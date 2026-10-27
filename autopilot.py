@@ -879,6 +879,26 @@ def main() -> None:
     else:
         payload = build_night_slot(plan, api_key, out_dir, cdn_base)
 
+    # النشر المباشر الاختياري على تيك توك عبر Zernio بدون حدود مهلة Make الـ 40 ثانية
+    payload["tiktok_published_direct"] = "false"
+    zernio_key = os.environ.get("ZERNIO_API_KEY", "").strip()
+    if zernio_key:
+        mp4_files = sorted(out_dir.glob("*.mp4"))
+        if mp4_files:
+            try:
+                from zernio_publisher import publish_video_to_tiktok_direct
+                tk_res = publish_video_to_tiktok_direct(
+                    video_path=mp4_files[0],
+                    caption=payload.get("tiktok_caption", ""),
+                    api_key=zernio_key,
+                )
+                if tk_res.get("ok"):
+                    payload["tiktok_published_direct"] = "true"
+                if tk_res.get("zernio_video_url"):
+                    payload["zernio_video_url"] = tk_res["zernio_video_url"]
+            except Exception as exc:
+                print(f"[TikTok Direct Warning] {exc} — Make.com fallback route will remain active.")
+
     payload_path = out_dir / "webhook_payload.json"
     with open(payload_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
