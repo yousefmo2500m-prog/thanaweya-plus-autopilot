@@ -1,5 +1,5 @@
 {
-    "name": "ثانويتي بلس - النسخة النهائية الجاهزة بالكامل (4 منصات + أول تعليق تلقائي)",
+    "name": "ثانويتي بلس - النسخة الشاملة الجاهزة (4 منصات + أول تعليق فيسبوك وإنستجرام)",
     "flow": [
         {
             "id": 1,
@@ -622,6 +622,76 @@
                             }
                         },
                         {
+                            "id": 15,
+                            "module": "facebook-pages:ListPosts",
+                            "version": 6,
+                            "parameters": {
+                                "__IMTCONN__": 12404418
+                            },
+                            "mapper": {
+                                "page_id": "1422213210973862",
+                                "limit": "1",
+                                "include_hidden": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 1260,
+                                    "y": -360,
+                                    "name": "15. فيسبوك: جلب معرّف المنشور المنشور للتو"
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "label": "Yousef's Facebook connection",
+                                            "data": {
+                                                "scoped": "true",
+                                                "connection": "facebook"
+                                            }
+                                        }
+                                    },
+                                    "expect": {
+                                        "page_id": {
+                                            "mode": "chose",
+                                            "label": "ثانويتي بلس"
+                                        },
+                                        "include_hidden": {
+                                            "mode": "chose"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:facebook",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "page_id",
+                                        "type": "select",
+                                        "label": "Page",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "include_hidden",
+                                        "type": "boolean",
+                                        "label": "Include hidden posts"
+                                    },
+                                    {
+                                        "name": "limit",
+                                        "type": "uinteger",
+                                        "label": "Limit",
+                                        "required": true,
+                                        "validate": {
+                                            "max": 500
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        {
                             "id": 9,
                             "module": "facebook-pages:CreateComment",
                             "version": 6,
@@ -630,7 +700,7 @@
                             },
                             "mapper": {
                                 "page_id": "1422213210973862",
-                                "id": "{{ifempty(4.post_id; 4.id)}}",
+                                "id": "{{ifempty(15.post_id; 15.id; 4.post_id; 4.id)}}",
                                 "message": "{{ifempty(1.first_comment; \"🚀 رابط منصة «ثانويتي بلس» المباشر (مجاناً لكل طلاب أولى وتانية وتالتة ثانوي والبكالوريا المصرية):\nhttps://thanaweya-ashy.vercel.app\")}}"
                             },
                             "onerror": [
@@ -641,7 +711,7 @@
                                     "mapper": {},
                                     "metadata": {
                                         "designer": {
-                                            "x": 1300,
+                                            "x": 1560,
                                             "y": -490
                                         }
                                     }
@@ -649,7 +719,7 @@
                             ],
                             "metadata": {
                                 "designer": {
-                                    "x": 1300,
+                                    "x": 1560,
                                     "y": -360,
                                     "name": "9. فيسبوك: وضع رابط الموقع في أول تعليق تلقائياً (الصبح والمغرب)"
                                 },
@@ -850,6 +920,76 @@
                             }
                         },
                         {
+                            "id": 16,
+                            "module": "facebook-pages:ListPosts",
+                            "version": 6,
+                            "parameters": {
+                                "__IMTCONN__": 12404418
+                            },
+                            "mapper": {
+                                "page_id": "1422213210973862",
+                                "limit": "1",
+                                "include_hidden": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 1440,
+                                    "y": -180,
+                                    "name": "16. فيسبوك: جلب معرّف منشور الفيديو بعد التجهيز"
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "label": "Yousef's Facebook connection",
+                                            "data": {
+                                                "scoped": "true",
+                                                "connection": "facebook"
+                                            }
+                                        }
+                                    },
+                                    "expect": {
+                                        "page_id": {
+                                            "mode": "chose",
+                                            "label": "ثانويتي بلس"
+                                        },
+                                        "include_hidden": {
+                                            "mode": "chose"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:facebook",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "page_id",
+                                        "type": "select",
+                                        "label": "Page",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "include_hidden",
+                                        "type": "boolean",
+                                        "label": "Include hidden posts"
+                                    },
+                                    {
+                                        "name": "limit",
+                                        "type": "uinteger",
+                                        "label": "Limit",
+                                        "required": true,
+                                        "validate": {
+                                            "max": 500
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        {
                             "id": 10,
                             "module": "facebook-pages:CreateComment",
                             "version": 6,
@@ -858,7 +998,7 @@
                             },
                             "mapper": {
                                 "page_id": "1422213210973862",
-                                "id": "{{ifempty(5.post_id; 5.video_id; 5.id)}}",
+                                "id": "{{ifempty(16.post_id; 16.id; \"1422213210973862_\" + 5.id)}}",
                                 "message": "{{ifempty(1.first_comment; \"🚀 رابط منصة «ثانويتي بلس» المباشر (مجاناً لكل طلاب أولى وتانية وتالتة ثانوي والبكالوريا المصرية):\nhttps://thanaweya-ashy.vercel.app\")}}"
                             },
                             "onerror": [
@@ -869,7 +1009,7 @@
                                     "mapper": {},
                                     "metadata": {
                                         "designer": {
-                                            "x": 1300,
+                                            "x": 1740,
                                             "y": -50
                                         }
                                     }
@@ -877,7 +1017,7 @@
                             ],
                             "metadata": {
                                 "designer": {
-                                    "x": 1440,
+                                    "x": 1740,
                                     "y": -180,
                                     "name": "10. فيسبوك: وضع رابط الموقع في أول تعليق على الفيديو (بليل)"
                                 },
@@ -982,6 +1122,86 @@
                                         "required": true
                                     }
                                 ]
+                            },
+                            "onerror": [
+                                {
+                                    "id": 18,
+                                    "module": "builtin:Ignore",
+                                    "version": 1,
+                                    "mapper": {},
+                                    "metadata": {
+                                        "designer": {
+                                            "x": 980,
+                                            "y": 110
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "id": 17,
+                            "module": "instagram-business:CreateComment2",
+                            "version": 1,
+                            "parameters": {
+                                "__IMTCONN__": 12404418
+                            },
+                            "mapper": {
+                                "id": "{{6.id}}",
+                                "message": "{{ifempty(1.first_comment; \"🚀 رابط منصة «ثانويتي بلس» المباشر (مجاناً لكل طلاب أولى وتانية وتالتة ثانوي والبكالوريا المصرية):\nhttps://thanaweya-ashy.vercel.app\")}}"
+                            },
+                            "onerror": [
+                                {
+                                    "id": 19,
+                                    "module": "builtin:Ignore",
+                                    "version": 1,
+                                    "mapper": {},
+                                    "metadata": {
+                                        "designer": {
+                                            "x": 1300,
+                                            "y": 110
+                                        }
+                                    }
+                                }
+                            ],
+                            "metadata": {
+                                "designer": {
+                                    "x": 1300,
+                                    "y": 0,
+                                    "name": "17. إنستجرام: وضع رابط الموقع في أول تعليق على الـ Reel"
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "data": {
+                                                "scoped": "true",
+                                                "connection": "facebook"
+                                            },
+                                            "label": "Yousef's Facebook connection"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:facebook",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "id",
+                                        "type": "text",
+                                        "label": "Media ID",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "message",
+                                        "type": "text",
+                                        "label": "Message",
+                                        "required": true
+                                    }
+                                ]
                             }
                         }
                     ]
@@ -1005,10 +1225,24 @@
                             "metadata": {
                                 "designer": {
                                     "x": 980,
-                                    "y": 180,
+                                    "y": 240,
                                     "name": "7. يوتيوب: نشر YouTube Shorts"
                                 }
-                            }
+                            },
+                            "onerror": [
+                                {
+                                    "id": 20,
+                                    "module": "builtin:Ignore",
+                                    "version": 1,
+                                    "mapper": {},
+                                    "metadata": {
+                                        "designer": {
+                                            "x": 980,
+                                            "y": 350
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     ]
                 },
@@ -1033,7 +1267,7 @@
                             "metadata": {
                                 "designer": {
                                     "x": 980,
-                                    "y": 360,
+                                    "y": 480,
                                     "name": "8. تيك توك: نشر الفيديو (Zernio مجاناً)"
                                 }
                             },
@@ -1058,7 +1292,7 @@
                                     "metadata": {
                                         "designer": {
                                             "x": 1300,
-                                            "y": 360
+                                            "y": 590
                                         }
                                     }
                                 }
