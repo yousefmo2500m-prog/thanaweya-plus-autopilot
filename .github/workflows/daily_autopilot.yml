@@ -5,8 +5,8 @@ on:
     # 07:00 AM Cairo (05:00 UTC) -> Morning Daily Study Schedule
     - cron: '0 5 * * *'
     # 05:30 PM Cairo (15:30 UTC) -> Maghrib Lesson Summary & Laws
-    - cron: '30 15 * (19:0* *'
-    # 09:00 PM Cairo 0 UTC) -> Night 30s Countdown Challenge
+    - cron: '30 15 * * *'
+    # 09:00 PM Cairo (19:00 UTC) -> Night 30s Countdown Challenge
     - cron: '0 19 * * *'
   workflow_dispatch:
     inputs:
@@ -62,10 +62,10 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "slot=${{ github.event.inputs.slot }}" >> $GITHUB_OUTPUT
           else
-            HOUR=$(TZ="Africa/Cairo" date +%H)
-            if [ "$HOUR" -lt 13 ]; then
+            UTC_HOUR=$((10#$(date -u +%H)))
+            if [ "$UTC_HOUR" -lt 11 ]; then
               echo "slot=morning" >> $GITHUB_OUTPUT
-            elif [ "$HOUR" -lt 19 ]; then
+            elif [ "$UTC_HOUR" -lt 18 ]; then
               echo "slot=maghrib" >> $GITHUB_OUTPUT
             else
               echo "slot=night" >> $GITHUB_OUTPUT
@@ -160,8 +160,8 @@ jobs:
           for k, v in list(data.items()):
               if isinstance(v, str) and "__CDN_BASE__" in v:
                   data[k] = v.replace("__CDN_BASE__", chosen)
-          # إذا تم رفع الفيديو سحابياً عبر Zernio نستخدم رابطه المباشر الفائق السرعة للفيديو أيضاً
-          if data.get("zernio_video_url", "").startswith("https://"):
+          # نحافظ على رابط jsDelivr الدائم (@COMMIT_SHA) حتى لا تنتهي صلاحيته أبداً
+          if not str(data.get("video_url", "")).startswith("https://") and data.get("zernio_video_url", "").startswith("https://"):
               data["video_url"] = data["zernio_video_url"]
           with open(p_path, "w", encoding="utf-8") as f:
               json.dump(data, f, ensure_ascii=False, indent=2)

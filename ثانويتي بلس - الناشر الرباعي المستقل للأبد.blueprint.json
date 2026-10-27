@@ -1,0 +1,1093 @@
+{
+    "name": "ثانويتي بلس - النسخة النهائية الجاهزة بالكامل (4 منصات + أول تعليق تلقائي)",
+    "flow": [
+        {
+            "id": 1,
+            "module": "gateway:CustomWebHook",
+            "version": 1,
+            "parameters": {
+                "maxResults": 1
+            },
+            "mapper": {},
+            "metadata": {
+                "designer": {
+                    "x": 0,
+                    "y": 0,
+                    "name": "1. استقبال البث الأوتوماتيكي (الصبح والمغرب وبليل)"
+                },
+                "interface": [
+                    {
+                        "name": "slot",
+                        "label": "slot",
+                        "type": "text"
+                    },
+                    {
+                        "name": "date",
+                        "label": "date",
+                        "type": "text"
+                    },
+                    {
+                        "name": "fb_mode",
+                        "label": "fb_mode",
+                        "type": "text"
+                    },
+                    {
+                        "name": "slide_1_url",
+                        "label": "slide_1_url",
+                        "type": "url"
+                    },
+                    {
+                        "name": "slide_2_url",
+                        "label": "slide_2_url",
+                        "type": "url"
+                    },
+                    {
+                        "name": "slide_3_url",
+                        "label": "slide_3_url",
+                        "type": "url"
+                    },
+                    {
+                        "name": "slide_4_url",
+                        "label": "slide_4_url",
+                        "type": "url"
+                    },
+                    {
+                        "name": "video_url",
+                        "label": "video_url",
+                        "type": "url"
+                    },
+                    {
+                        "name": "facebook_caption",
+                        "label": "facebook_caption",
+                        "type": "text"
+                    },
+                    {
+                        "name": "instagram_caption",
+                        "label": "instagram_caption",
+                        "type": "text"
+                    },
+                    {
+                        "name": "youtube_title",
+                        "label": "youtube_title",
+                        "type": "text"
+                    },
+                    {
+                        "name": "youtube_description",
+                        "label": "youtube_description",
+                        "type": "text"
+                    },
+                    {
+                        "name": "tiktok_caption",
+                        "label": "tiktok_caption",
+                        "type": "text"
+                    },
+                    {
+                        "name": "first_comment",
+                        "label": "first_comment",
+                        "type": "text"
+                    },
+                    {
+                        "name": "tiktok_published_direct",
+                        "label": "tiktok_published_direct",
+                        "type": "text"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 2,
+            "module": "http:MakeRequest",
+            "version": 4,
+            "parameters": {
+                "authenticationType": "noAuth"
+            },
+            "mapper": {
+                "url": "{{1.video_url}}",
+                "method": "get",
+                "headers": [
+                    {
+                        "name": "Accept",
+                        "value": "video/mp4,*/*"
+                    },
+                    {
+                        "name": "User-Agent",
+                        "value": "Mozilla/5.0 (compatible; ThanaweyaPlusBot/3.1)"
+                    }
+                ],
+                "parseResponse": false,
+                "stopOnHttpError": true,
+                "timeout": 240,
+                "allowRedirects": true,
+                "shareCookies": false,
+                "requestCompressedContent": true
+            },
+            "metadata": {
+                "designer": {
+                    "x": 320,
+                    "y": 0,
+                    "name": "2. تحميل ملف الفيديو MP4"
+                },
+                "restore": {
+                    "parameters": {
+                        "authenticationType": {
+                            "mode": "chose",
+                            "label": "No authentication"
+                        }
+                    },
+                    "expect": {
+                        "method": {
+                            "mode": "chose",
+                            "label": "GET"
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "authenticationType",
+                        "label": "Authentication type",
+                        "placeholder": "Select authentication type",
+                        "type": "select",
+                        "required": true,
+                        "mappable": false,
+                        "validate": {
+                            "enum": [
+                                "noAuth",
+                                "apiKeyConnection",
+                                "basicAuthConnection",
+                                "oAuth",
+                                "apiKey",
+                                "basicAuth"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "tlsType",
+                        "label": "Transport layer security (TLS)",
+                        "placeholder": "Select TLS type",
+                        "type": "select",
+                        "advanced": true,
+                        "mappable": false,
+                        "validate": {
+                            "enum": [
+                                "mTls",
+                                "tls"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "proxyKeychain",
+                        "label": "Proxy",
+                        "type": "keychain:proxy",
+                        "advanced": true
+                    }
+                ],
+                "expect": [
+                    {
+                        "name": "url",
+                        "label": "URL",
+                        "type": "url",
+                        "required": true
+                    },
+                    {
+                        "name": "method",
+                        "label": "Method",
+                        "type": "select",
+                        "required": true,
+                        "default": "get",
+                        "validate": {
+                            "enum": [
+                                "get",
+                                "head",
+                                "post",
+                                "put",
+                                "patch",
+                                "delete",
+                                "options"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "headers",
+                        "label": "Headers",
+                        "type": "array",
+                        "labels": {
+                            "add": "Add a header"
+                        },
+                        "spec": {
+                            "name": "header",
+                            "label": "Header",
+                            "type": "collection",
+                            "spec": [
+                                {
+                                    "name": "name",
+                                    "label": "Name",
+                                    "type": "text",
+                                    "required": true,
+                                    "validate": {
+                                        "pattern": "^[-!#$%&'*+.^_`|~0-9A-Za-z]+$"
+                                    }
+                                },
+                                {
+                                    "name": "value",
+                                    "label": "Value",
+                                    "type": "text"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "queryParameters",
+                        "label": "Query parameters",
+                        "type": "array",
+                        "labels": {
+                            "add": "Add a parameter"
+                        },
+                        "spec": {
+                            "name": "queryParameter",
+                            "label": "Parameter",
+                            "type": "collection",
+                            "spec": [
+                                {
+                                    "name": "name",
+                                    "label": "Name",
+                                    "type": "text",
+                                    "required": true
+                                },
+                                {
+                                    "name": "value",
+                                    "label": "Value",
+                                    "type": "text"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "contentType",
+                        "label": "Body content type",
+                        "placeholder": "Select body content type",
+                        "type": "select",
+                        "mappable": false,
+                        "validate": {
+                            "enum": [
+                                "json",
+                                "multipart",
+                                "urlEncoded",
+                                "custom"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "parseResponse",
+                        "label": "Parse response",
+                        "type": "boolean",
+                        "required": true,
+                        "default": true
+                    },
+                    {
+                        "name": "stopOnHttpError",
+                        "label": "Return error if HTTP request fails",
+                        "type": "boolean",
+                        "required": true,
+                        "advanced": true,
+                        "default": true
+                    },
+                    {
+                        "name": "timeout",
+                        "label": "Timeout",
+                        "type": "uinteger",
+                        "advanced": true,
+                        "default": 40,
+                        "validate": {
+                            "min": 1,
+                            "max": 300
+                        }
+                    },
+                    {
+                        "name": "allowRedirects",
+                        "label": "Allow redirects",
+                        "type": "boolean",
+                        "required": true,
+                        "advanced": true,
+                        "default": true
+                    },
+                    {
+                        "name": "shareCookies",
+                        "label": "Share cookies with other HTTP modules",
+                        "type": "boolean",
+                        "required": true,
+                        "default": false,
+                        "advanced": true
+                    },
+                    {
+                        "name": "requestCompressedContent",
+                        "label": "Request compressed content",
+                        "type": "boolean",
+                        "required": true,
+                        "default": true,
+                        "advanced": true
+                    }
+                ],
+                "interface": [
+                    {
+                        "name": "data",
+                        "label": "Data",
+                        "type": "any"
+                    },
+                    {
+                        "name": "statusCode",
+                        "label": "Status Code",
+                        "type": "number"
+                    },
+                    {
+                        "name": "headers",
+                        "label": "Headers",
+                        "type": "collection",
+                        "spec": [
+                            {
+                                "name": "content-length",
+                                "label": "Content-Length",
+                                "type": "text"
+                            },
+                            {
+                                "name": "content-encoding",
+                                "label": "Content-Encoding",
+                                "type": "text"
+                            },
+                            {
+                                "name": "content-type",
+                                "label": "Content-Type",
+                                "type": "text"
+                            },
+                            {
+                                "name": "server",
+                                "label": "Server",
+                                "type": "text"
+                            },
+                            {
+                                "name": "cache-control",
+                                "label": "Cache-Control",
+                                "type": "text"
+                            },
+                            {
+                                "name": "set-cookie",
+                                "label": "Set-Cookie",
+                                "type": "array",
+                                "spec": {
+                                    "type": "text"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
+            "filter": {
+                "name": "التأكد من وجود رابط الفيديو",
+                "conditions": [
+                    [
+                        {
+                            "a": "{{1.video_url}}",
+                            "o": "exist"
+                        }
+                    ]
+                ]
+            }
+        },
+        {
+            "id": 3,
+            "module": "builtin:BasicRouter",
+            "version": 1,
+            "mapper": null,
+            "metadata": {
+                "designer": {
+                    "x": 640,
+                    "y": 0,
+                    "name": "3. التوزيع على الـ 4 منصات"
+                }
+            },
+            "routes": [
+                {
+                    "flow": [
+                        {
+                            "id": 4,
+                            "module": "facebook-pages:CreatePostWithPhotos",
+                            "version": 6,
+                            "parameters": {
+                                "__IMTCONN__": 12404418
+                            },
+                            "mapper": {
+                                "page_id": "1422213210973862",
+                                "photos": [
+                                    {
+                                        "url": "{{1.slide_1_url}}",
+                                        "type": "url"
+                                    },
+                                    {
+                                        "url": "{{1.slide_2_url}}",
+                                        "type": "url"
+                                    },
+                                    {
+                                        "url": "{{1.slide_3_url}}",
+                                        "type": "url"
+                                    },
+                                    {
+                                        "url": "{{1.slide_4_url}}",
+                                        "type": "url"
+                                    }
+                                ],
+                                "message": "{{1.facebook_caption}}"
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 980,
+                                    "y": -360,
+                                    "name": "4. فيسبوك: نشر ألبوم الـ 4 بطاقات (أولى + بكالوريا 4 مسارات + ثانية عام + ثالثة)"
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "label": "Yousef's Facebook connection"
+                                        }
+                                    },
+                                    "expect": {
+                                        "page_id": {
+                                            "mode": "chose",
+                                            "label": "ثانويتي بلس"
+                                        },
+                                        "photos": {
+                                            "items": [
+                                                {
+                                                    "type": {
+                                                        "mode": "chose",
+                                                        "label": "Map from previous module",
+                                                        "nested": [
+                                                            {
+                                                                "name": "fileName",
+                                                                "type": "filename",
+                                                                "label": "File name",
+                                                                "required": true,
+                                                                "semantic": "file:name"
+                                                            },
+                                                            {
+                                                                "name": "data",
+                                                                "type": "buffer",
+                                                                "label": "Data",
+                                                                "required": true,
+                                                                "semantic": "file:data"
+                                                            }
+                                                        ]
+                                                    }
+                                                },
+                                                {
+                                                    "type": {
+                                                        "mode": "chose",
+                                                        "label": "Map from previous module",
+                                                        "nested": [
+                                                            {
+                                                                "name": "fileName",
+                                                                "type": "filename",
+                                                                "label": "File name",
+                                                                "required": true,
+                                                                "semantic": "file:name"
+                                                            },
+                                                            {
+                                                                "name": "data",
+                                                                "type": "buffer",
+                                                                "label": "Data",
+                                                                "required": true,
+                                                                "semantic": "file:data"
+                                                            }
+                                                        ]
+                                                    }
+                                                },
+                                                {
+                                                    "type": {
+                                                        "mode": "chose",
+                                                        "label": "Map from previous module",
+                                                        "nested": [
+                                                            {
+                                                                "name": "fileName",
+                                                                "type": "filename",
+                                                                "label": "File name",
+                                                                "required": true,
+                                                                "semantic": "file:name"
+                                                            },
+                                                            {
+                                                                "name": "data",
+                                                                "type": "buffer",
+                                                                "label": "Data",
+                                                                "required": true,
+                                                                "semantic": "file:data"
+                                                            }
+                                                        ]
+                                                    }
+                                                },
+                                                {
+                                                    "type": {
+                                                        "mode": "chose",
+                                                        "label": "Map from previous module",
+                                                        "nested": [
+                                                            {
+                                                                "name": "fileName",
+                                                                "type": "filename",
+                                                                "label": "File name",
+                                                                "required": true,
+                                                                "semantic": "file:name"
+                                                            },
+                                                            {
+                                                                "name": "data",
+                                                                "type": "buffer",
+                                                                "label": "Data",
+                                                                "required": true,
+                                                                "semantic": "file:data"
+                                                            }
+                                                        ]
+                                                    }
+                                                }
+                                            ],
+                                            "mode": "chose"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:facebook",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "page_id",
+                                        "type": "select",
+                                        "label": "Page",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "photos",
+                                        "spec": [
+                                            {
+                                                "name": "type",
+                                                "type": "select",
+                                                "label": "Image input type",
+                                                "required": true,
+                                                "validate": {
+                                                    "enum": [
+                                                        "data",
+                                                        "url"
+                                                    ]
+                                                }
+                                            },
+                                            {
+                                                "name": "caption",
+                                                "type": "text",
+                                                "label": "Image caption",
+                                                "required": false
+                                            }
+                                        ],
+                                        "type": "array",
+                                        "label": "Photos",
+                                        "required": true,
+                                        "validate": {
+                                            "maxItems": 30,
+                                            "minItems": 1
+                                        }
+                                    },
+                                    {
+                                        "name": "message",
+                                        "type": "text",
+                                        "label": "Post caption",
+                                        "required": false
+                                    },
+                                    {
+                                        "name": "date",
+                                        "type": "date",
+                                        "label": "Publish date",
+                                        "advanced": true,
+                                        "required": false
+                                    }
+                                ]
+                            },
+                            "filter": {
+                                "name": "ألبوم الصبح والمغرب",
+                                "conditions": [
+                                    [
+                                        {
+                                            "a": "{{1.fb_mode}}",
+                                            "b": "album",
+                                            "o": "text:equal"
+                                        }
+                                    ]
+                                ]
+                            }
+                        },
+                        {
+                            "id": 9,
+                            "module": "facebook-pages:CreateComment",
+                            "version": 6,
+                            "parameters": {
+                                "__IMTCONN__": 12404418
+                            },
+                            "mapper": {
+                                "page_id": "1422213210973862",
+                                "id": "{{ifempty(4.post_id; 4.id)}}",
+                                "message": "{{ifempty(1.first_comment; \"🚀 رابط منصة «ثانويتي بلس» المباشر (مجاناً لكل طلاب أولى وتانية وتالتة ثانوي والبكالوريا المصرية):\nhttps://thanaweya-ashy.vercel.app\")}}"
+                            },
+                            "onerror": [
+                                {
+                                    "id": 11,
+                                    "module": "builtin:Ignore",
+                                    "version": 1,
+                                    "mapper": {},
+                                    "metadata": {
+                                        "designer": {
+                                            "x": 1300,
+                                            "y": -490
+                                        }
+                                    }
+                                }
+                            ],
+                            "metadata": {
+                                "designer": {
+                                    "x": 1300,
+                                    "y": -360,
+                                    "name": "9. فيسبوك: وضع رابط الموقع في أول تعليق تلقائياً (الصبح والمغرب)"
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "label": "Yousef's Facebook connection",
+                                            "data": {
+                                                "scoped": "true",
+                                                "connection": "facebook"
+                                            }
+                                        }
+                                    },
+                                    "expect": {
+                                        "page_id": {
+                                            "mode": "chose",
+                                            "label": "ثانويتي بلس"
+                                        },
+                                        "attachment": {
+                                            "mode": "chose",
+                                            "label": "Empty"
+                                        },
+                                        "id": {
+                                            "mode": "edit"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:facebook",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "page_id",
+                                        "type": "select",
+                                        "label": "Page",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "message",
+                                        "type": "text",
+                                        "label": "Message"
+                                    },
+                                    {
+                                        "name": "attachment",
+                                        "type": "select",
+                                        "label": "Attachment type",
+                                        "validate": {
+                                            "enum": [
+                                                "url",
+                                                "share"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "name": "id",
+                                        "type": "select",
+                                        "label": "Post ID",
+                                        "required": true
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "flow": [
+                        {
+                            "id": 5,
+                            "module": "facebook-pages:UploadVideo",
+                            "version": 6,
+                            "parameters": {
+                                "__IMTCONN__": 12404418
+                            },
+                            "filter": {
+                                "name": "فيديو تحدي الـ 30 ثانية بليل",
+                                "conditions": [
+                                    [
+                                        {
+                                            "a": "{{1.fb_mode}}",
+                                            "b": "video",
+                                            "o": "text:equal"
+                                        }
+                                    ]
+                                ]
+                            },
+                            "mapper": {
+                                "page_id": "1422213210973862",
+                                "type": "data",
+                                "fileName": "thanaweya_challenge_30s.mp4",
+                                "data": "{{2.data}}",
+                                "description": "{{1.facebook_caption}}"
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 980,
+                                    "y": -180,
+                                    "name": "5. فيسبوك: نشر فيديو تحدي 30 ثانية (بليل)"
+                                },
+                                "restore": {
+                                    "expect": {
+                                        "type": {
+                                            "mode": "chose",
+                                            "label": "upload a video"
+                                        },
+                                        "page_id": {
+                                            "mode": "chose",
+                                            "label": "ثانويتي بلس"
+                                        }
+                                    },
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "data": {
+                                                "scoped": "true",
+                                                "connection": "facebook"
+                                            },
+                                            "label": "My Facebook connection"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:facebook",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "page_id",
+                                        "type": "select",
+                                        "label": "Page",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "type",
+                                        "type": "select",
+                                        "label": "Type",
+                                        "required": true,
+                                        "validate": {
+                                            "enum": [
+                                                "data",
+                                                "url"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "name": "description",
+                                        "type": "text",
+                                        "label": "Description"
+                                    },
+                                    {
+                                        "name": "fileName",
+                                        "type": "filename",
+                                        "label": "File name",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "data",
+                                        "type": "buffer",
+                                        "label": "Data",
+                                        "required": true
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "id": 14,
+                            "module": "util:FunctionSleep",
+                            "version": 1,
+                            "parameters": {},
+                            "mapper": {
+                                "duration": "15"
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 1140,
+                                    "y": -180,
+                                    "name": "14. انتظار 15 ثانية لتجهيز الفيديو على فيسبوك قبل كتابة التعليق"
+                                },
+                                "expect": [
+                                    {
+                                        "name": "duration",
+                                        "type": "uinteger",
+                                        "label": "Delay",
+                                        "required": true,
+                                        "validate": {
+                                            "min": 1,
+                                            "max": 300
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "id": 10,
+                            "module": "facebook-pages:CreateComment",
+                            "version": 6,
+                            "parameters": {
+                                "__IMTCONN__": 12404418
+                            },
+                            "mapper": {
+                                "page_id": "1422213210973862",
+                                "id": "{{ifempty(5.post_id; 5.video_id; 5.id)}}",
+                                "message": "{{ifempty(1.first_comment; \"🚀 رابط منصة «ثانويتي بلس» المباشر (مجاناً لكل طلاب أولى وتانية وتالتة ثانوي والبكالوريا المصرية):\nhttps://thanaweya-ashy.vercel.app\")}}"
+                            },
+                            "onerror": [
+                                {
+                                    "id": 12,
+                                    "module": "builtin:Ignore",
+                                    "version": 1,
+                                    "mapper": {},
+                                    "metadata": {
+                                        "designer": {
+                                            "x": 1300,
+                                            "y": -50
+                                        }
+                                    }
+                                }
+                            ],
+                            "metadata": {
+                                "designer": {
+                                    "x": 1440,
+                                    "y": -180,
+                                    "name": "10. فيسبوك: وضع رابط الموقع في أول تعليق على الفيديو (بليل)"
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "label": "Yousef's Facebook connection",
+                                            "data": {
+                                                "scoped": "true",
+                                                "connection": "facebook"
+                                            }
+                                        }
+                                    },
+                                    "expect": {
+                                        "page_id": {
+                                            "mode": "chose",
+                                            "label": "ثانويتي بلس"
+                                        },
+                                        "attachment": {
+                                            "mode": "chose",
+                                            "label": "Empty"
+                                        },
+                                        "id": {
+                                            "mode": "edit"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:facebook",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "page_id",
+                                        "type": "select",
+                                        "label": "Page",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "message",
+                                        "type": "text",
+                                        "label": "Message"
+                                    },
+                                    {
+                                        "name": "attachment",
+                                        "type": "select",
+                                        "label": "Attachment type",
+                                        "validate": {
+                                            "enum": [
+                                                "url",
+                                                "share"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "name": "id",
+                                        "type": "select",
+                                        "label": "Post ID",
+                                        "required": true
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "flow": [
+                        {
+                            "id": 6,
+                            "module": "instagram-business:CreateAReelPost",
+                            "version": 1,
+                            "parameters": {
+                                "__IMTCONN__": 12404418
+                            },
+                            "mapper": {
+                                "video_url": "{{1.video_url}}",
+                                "caption": "{{1.instagram_caption}}",
+                                "share_to_feed": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 980,
+                                    "y": 0,
+                                    "name": "6. إنستجرام: نشر Reel على الحساب"
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "label": "Yousef's Facebook connection"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:facebook",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "flow": [
+                        {
+                            "id": 7,
+                            "module": "youtube:uploadVideo",
+                            "version": 4,
+                            "parameters": {},
+                            "mapper": {
+                                "title": "{{substring(1.youtube_title; 0; 95)}}",
+                                "description": "{{1.youtube_description}}",
+                                "fileName": "thanaweya_short.mp4",
+                                "data": "{{2.data}}",
+                                "categoryId": "27",
+                                "privacyStatus": "public",
+                                "selfDeclaredMadeForKids": false
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 980,
+                                    "y": 180,
+                                    "name": "7. يوتيوب: نشر YouTube Shorts"
+                                }
+                            }
+                        }
+                    ]
+                },
+                {
+                    "flow": [
+                        {
+                            "id": 8,
+                            "module": "make-nodes-late:addTiktokPost",
+                            "version": 1,
+                            "parameters": {},
+                            "mapper": {
+                                "content": "{{1.tiktok_caption}}",
+                                "caption": "{{1.tiktok_caption}}",
+                                "videoUrl": "{{1.video_url}}",
+                                "privacyLevel": "PUBLIC_TO_EVERYONE",
+                                "allowComment": true,
+                                "allowDuet": true,
+                                "allowStitch": true,
+                                "contentPreviewConfirmed": true,
+                                "expressConsentGiven": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 980,
+                                    "y": 360,
+                                    "name": "8. تيك توك: نشر الفيديو (Zernio مجاناً)"
+                                }
+                            },
+                            "filter": {
+                                "name": "لم يُنشر مباشرة من GitHub بعد",
+                                "conditions": [
+                                    [
+                                        {
+                                            "a": "{{1.tiktok_published_direct}}",
+                                            "b": "true",
+                                            "o": "text:notequal"
+                                        }
+                                    ]
+                                ]
+                            },
+                            "onerror": [
+                                {
+                                    "id": 13,
+                                    "module": "builtin:Ignore",
+                                    "version": 1,
+                                    "mapper": {},
+                                    "metadata": {
+                                        "designer": {
+                                            "x": 1300,
+                                            "y": 360
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "metadata": {
+        "instant": true,
+        "version": 1,
+        "scenario": {
+            "roundtrips": 1,
+            "maxErrors": 3,
+            "autoCommit": true,
+            "autoCommitTriggerLast": true,
+            "sequential": false,
+            "slots": null,
+            "confidential": false,
+            "dataloss": false,
+            "dlq": false,
+            "freshVariables": false
+        },
+        "designer": {
+            "orphans": []
+        },
+        "zone": "eu1.make.com",
+        "notes": []
+    }
+}

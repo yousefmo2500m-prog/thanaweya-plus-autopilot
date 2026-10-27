@@ -529,7 +529,7 @@ def render_countdown_quiz_video(
     - بدون كشف الإجابة نهائياً!
     """
     W, H = 1080, 1920
-    fps = 15
+    fps = 30
     total_frames = 30 * fps
     ffmpeg = get_ffmpeg()
 
@@ -621,6 +621,13 @@ def render_countdown_quiz_video(
     cx, cy_ring = W // 2, 490
     ring_r = 122
 
+    # تحسين الأداء لـ 30 إطار/ثانية (متوافق 100% مع شرط تيك توك 23-60 FPS) برسم رقعة العداد فقط
+    patch_half = ring_r + 24
+    px0, py0 = cx - patch_half, cy_ring - patch_half
+    px1, py1 = cx + patch_half, cy_ring + patch_half
+    base_patch = base.crop((px0, py0, px1, py1))
+    pcx, pcy = patch_half, patch_half
+
     with tempfile.TemporaryDirectory() as tmpdir:
         wav_path = Path(tmpdir) / "timer30.wav"
         _generate_countdown_30s_wav(wav_path)
@@ -632,8 +639,10 @@ def render_countdown_quiz_video(
             "-s", f"{W}x{H}", "-pix_fmt", "rgb24", "-r", str(fps),
             "-i", "-",
             "-i", str(wav_path),
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
+            "-threads", "2",
             "-pix_fmt", "yuv420p",
+            "-r", str(fps),
             "-c:a", "aac", "-b:a", "128k",
             "-movflags", "+faststart",
             "-shortest",
@@ -642,20 +651,21 @@ def render_countdown_quiz_video(
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         assert proc.stdin is not None
 
+        frame = base.copy()
         for frame_idx in range(total_frames):
             t_elapsed = frame_idx / float(fps)
             rem = max(0.0, 30.0 - t_elapsed)
             sec_int = int(math.ceil(rem)) if rem > 0.05 else 0
             frac = rem / 30.0
 
-            frame = base.copy()
-            fd = ImageDraw.Draw(frame)
+            patch = base_patch.copy()
+            fd = ImageDraw.Draw(patch)
 
             urgent = sec_int <= 5
             ring_color = RED_NEON if urgent else (GOLD if sec_int <= 10 else TEAL)
 
-            fd.ellipse([cx - ring_r - 12, cy_ring - ring_r - 12, cx + ring_r + 12, cy_ring + ring_r + 12], fill=(15, 24, 44), outline=(36, 56, 88), width=3)
-            bbox_arc = [cx - ring_r, cy_ring - ring_r, cx + ring_r, cy_ring + ring_r]
+            fd.ellipse([pcx - ring_r - 12, pcy - ring_r - 12, pcx + ring_r + 12, pcy + ring_r + 12], fill=(15, 24, 44), outline=(36, 56, 88), width=3)
+            bbox_arc = [pcx - ring_r, pcy - ring_r, pcx + ring_r, pcy + ring_r]
             fd.arc(bbox_arc, start=0, end=360, fill=(32, 46, 74), width=16)
             if frac > 0.002:
                 end_angle = -90 + 360.0 * frac
@@ -664,9 +674,10 @@ def render_countdown_quiz_video(
             num_str = str(sec_int)
             nb = fd.textbbox((0, 0), num_str, font=f_num)
             nw = nb[2] - nb[0]
-            fd.text((cx - nw // 2, cy_ring - 68), num_str, font=f_num, fill=(RED_NEON if urgent else WHITE))
-            draw_centered_rtl(fd, "انتهى الوقت!" if sec_int == 0 else "ثانية", cx, cy_ring + 36, f_sec_lbl, ring_color)
+            fd.text((pcx - nw // 2, pcy - 68), num_str, font=f_num, fill=(RED_NEON if urgent else WHITE))
+            draw_centered_rtl(fd, "انتهى الوقت!" if sec_int == 0 else "ثانية", pcx, pcy + 36, f_sec_lbl, ring_color)
 
+            frame.paste(patch, (px0, py0))
             proc.stdin.write(frame.tobytes())
 
         proc.stdin.close()
