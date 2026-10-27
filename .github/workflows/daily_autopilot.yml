@@ -5,8 +5,8 @@ on:
     # 07:00 AM Cairo (05:00 UTC) -> Morning Daily Study Schedule
     - cron: '0 5 * * *'
     # 05:30 PM Cairo (15:30 UTC) -> Maghrib Lesson Summary & Laws
-    - cron: '30 15 * * *'
-    # 09:00 PM Cairo (19:00 UTC) -> Night 30s Countdown Challenge
+    - cron: '30 15 * (19:0* *'
+    # 09:00 PM Cairo 0 UTC) -> Night 30s Countdown Challenge
     - cron: '0 19 * * *'
   workflow_dispatch:
     inputs:
