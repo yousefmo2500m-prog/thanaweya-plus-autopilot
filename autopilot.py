@@ -879,25 +879,35 @@ def main() -> None:
     else:
         payload = build_night_slot(plan, api_key, out_dir, cdn_base)
 
-    # النشر المباشر الاختياري على تيك توك عبر Zernio بدون حدود مهلة Make الـ 40 ثانية
+    # النشر المباشر عبر Zernio (تيك توك + أول تعليق مثبت، ويوتيوب/إنستجرام بأول تعليق تلقائي إن تم ربطهما في Zernio)
     payload["tiktok_published_direct"] = "false"
+    payload["youtube_published_direct"] = "false"
+    payload["instagram_published_direct"] = "false"
     zernio_key = os.environ.get("ZERNIO_API_KEY", "").strip()
     if zernio_key:
         mp4_files = sorted(out_dir.glob("*.mp4"))
         if mp4_files:
             try:
-                from zernio_publisher import publish_video_to_tiktok_direct
-                tk_res = publish_video_to_tiktok_direct(
+                from zernio_publisher import publish_direct_via_zernio
+                z_res = publish_direct_via_zernio(
                     video_path=mp4_files[0],
-                    caption=payload.get("tiktok_caption", ""),
+                    tiktok_caption=payload.get("tiktok_caption", ""),
+                    youtube_title=payload.get("youtube_title", ""),
+                    youtube_description=payload.get("youtube_description", ""),
+                    instagram_caption=payload.get("instagram_caption", ""),
+                    first_comment=payload.get("first_comment", ""),
                     api_key=zernio_key,
                 )
-                if tk_res.get("ok"):
+                if z_res.get("tiktok_ok"):
                     payload["tiktok_published_direct"] = "true"
-                if tk_res.get("zernio_video_url"):
-                    payload["zernio_video_url"] = tk_res["zernio_video_url"]
+                if z_res.get("youtube_ok"):
+                    payload["youtube_published_direct"] = "true"
+                if z_res.get("instagram_ok"):
+                    payload["instagram_published_direct"] = "true"
+                if z_res.get("zernio_video_url"):
+                    payload["zernio_video_url"] = z_res["zernio_video_url"]
             except Exception as exc:
-                print(f"[TikTok Direct Warning] {exc} — Make.com fallback route will remain active.")
+                print(f"[Zernio Direct Warning] {exc} — Make.com fallback routes will remain active.")
 
     payload_path = out_dir / "webhook_payload.json"
     with open(payload_path, "w", encoding="utf-8") as f:

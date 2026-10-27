@@ -1136,7 +1136,47 @@
                                         }
                                     }
                                 }
-                            ]
+                            ],
+                            "filter": {
+                                "name": "لم يُنشر إنستجرام مباشرة عبر Zernio",
+                                "conditions": [
+                                    [
+                                        {
+                                            "a": "{{1.instagram_published_direct}}",
+                                            "b": "true",
+                                            "o": "text:notequal"
+                                        }
+                                    ]
+                                ]
+                            }
+                        },
+                        {
+                            "id": 21,
+                            "module": "util:FunctionSleep",
+                            "version": 1,
+                            "parameters": {},
+                            "mapper": {
+                                "duration": "10"
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 1260,
+                                    "y": 0,
+                                    "name": "21. انتظار 10 ثوانٍ لتجهيز الـ Reel قبل كتابة أول تعليق"
+                                },
+                                "expect": [
+                                    {
+                                        "name": "duration",
+                                        "type": "uinteger",
+                                        "label": "Delay",
+                                        "required": true,
+                                        "validate": {
+                                            "min": 1,
+                                            "max": 300
+                                        }
+                                    }
+                                ]
+                            }
                         },
                         {
                             "id": 17,
@@ -1146,7 +1186,7 @@
                                 "__IMTCONN__": 12404418
                             },
                             "mapper": {
-                                "id": "{{6.id}}",
+                                "id": "{{ifempty(6.id; 6.post_id)}}",
                                 "message": "{{ifempty(1.first_comment; \"🚀 رابط منصة «ثانويتي بلس» المباشر (مجاناً لكل طلاب أولى وتانية وتالتة ثانوي والبكالوريا المصرية):\nhttps://thanaweya-ashy.vercel.app\")}}"
                             },
                             "onerror": [
@@ -1157,7 +1197,7 @@
                                     "mapper": {},
                                     "metadata": {
                                         "designer": {
-                                            "x": 1300,
+                                            "x": 1560,
                                             "y": 110
                                         }
                                     }
@@ -1165,7 +1205,7 @@
                             ],
                             "metadata": {
                                 "designer": {
-                                    "x": 1300,
+                                    "x": 1560,
                                     "y": 0,
                                     "name": "17. إنستجرام: وضع رابط الموقع في أول تعليق على الـ Reel"
                                 },
@@ -1242,7 +1282,19 @@
                                         }
                                     }
                                 }
-                            ]
+                            ],
+                            "filter": {
+                                "name": "لم يُنشر يوتيوب مباشرة عبر Zernio",
+                                "conditions": [
+                                    [
+                                        {
+                                            "a": "{{1.youtube_published_direct}}",
+                                            "b": "true",
+                                            "o": "text:notequal"
+                                        }
+                                    ]
+                                ]
+                            }
                         }
                     ]
                 },
