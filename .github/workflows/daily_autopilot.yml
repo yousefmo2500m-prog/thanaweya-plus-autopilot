@@ -1,0 +1,115 @@
+name: Thanaweya Plus Daily Autopilot
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+    - cron: '30 15 * * *'
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: 'نوع النشرة المراد إرسالها الآن'
+        required: true
+        default: 'morning'
+        type: choice
+        options:
+          - morning
+          - maghrib
+          - night
+
+permissions:
+  contents: write
+
+concurrency:
+  group: thanaweya-autopilot
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 & FFmpeg
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg libraqm0 libharfbuzz0b libfribidi0
+
+      - name: Install Python dependencies
+        run: |
+          REQ_FILE=$(find . -maxdepth 3 -name "requirements.txt" | head -n 1)
+          pip install --upgrade pip
+          pip install -r "$REQ_FILE"
+
+      - name: Determine time slot
+        id: slot
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "slot=${{ github.event.inputs.slot }}" >> $GITHUB_OUTPUT
+          else
+            HOUR=$(TZ="Africa/Cairo" date +%H)
+            if [ "$HOUR" -lt 13 ]; then
+              echo "slot=morning" >> $GITHUB_OUTPUT
+            elif [ "$HOUR" -lt 19 ]; then
+              echo "slot=maghrib" >> $GITHUB_OUTPUT
+            else
+              echo "slot=night" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Generate curriculum cards, video & captions
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          AUTO_PY=$(find . -maxdepth 3 -name "autopilot.py" | head -n 1)
+          python "$AUTO_PY" \
+            --slot "${{ steps.slot.outputs.slot }}" \
+            --out-dir /tmp/autopilot_out \
+            --cdn-base "https://raw.githubusercontent.com/${{ github.repository }}/media-cdn/latest"
+
+      - name: Publish clean media to orphan media-cdn branch
+        run: |
+          mkdir -p /tmp/media_cdn/latest
+          cp /tmp/autopilot_out/*.jpg /tmp/media_cdn/latest/ 2>/dev/null || true
+          cp /tmp/autopilot_out/*.mp4 /tmp/media_cdn/latest/ 2>/dev/null || true
+          cd /tmp/media_cdn
+          git init -b media-cdn
+          git config user.name "thanaweya-autopilot[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "CDN media $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" media-cdn:media-cdn
+
+      - name: Keep-alive heartbeat on main
+        run: |
+          git config user.name "thanaweya-autopilot[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "Last run: $(TZ=Africa/Cairo date) | Slot: ${{ steps.slot.outputs.slot }}" > last_run.txt
+          git add last_run.txt
+          git diff --cached --quiet || git commit -m "Autopilot heartbeat: ${{ steps.slot.outputs.slot }}"
+          git push origin HEAD || true
+
+      - name: Trigger Make.com 4-Platform Publisher
+        env:
+          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
+        run: |
+          sleep 5
+          if [ -z "$MAKE_WEBHOOK_URL" ]; then
+            echo "::error::MAKE_WEBHOOK_URL secret is empty!"
+            exit 1
+          fi
+          HTTP_CODE=$(curl -sS -o /tmp/make_resp.txt -w "%{http_code}" \
+            -X POST "$MAKE_WEBHOOK_URL" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            --data-binary @/tmp/autopilot_out/webhook_payload.json)
+          echo "Make.com response ($HTTP_CODE): $(cat /tmp/make_resp.txt)"
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            exit 1
+          fi
