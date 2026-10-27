@@ -30,20 +30,23 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11 & FFmpeg
+      - name: Set up Python 3.11 (with pip cache)
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: Install system libraries (FFmpeg + HarfBuzz/Raqm for Arabic shaping)
+      - name: Install Arabic shaping library (libraqm0) & FFmpeg
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y ffmpeg libraqm0 libharfbuzz0b libfribidi0
+          if ! dpkg -s libraqm0 >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y --no-install-recommends ffmpeg libraqm0 libharfbuzz0b libfribidi0
+          fi
 
       - name: Install Python dependencies
         run: |
@@ -51,7 +54,6 @@ jobs:
           if [ -f "thanaweya-autopilot/requirements.txt" ]; then
             REQ_FILE="thanaweya-autopilot/requirements.txt"
           fi
-          pip install --upgrade pip
           pip install -r "$REQ_FILE"
 
       - name: Determine time slot (Morning / Maghrib / Night)
@@ -70,9 +72,10 @@ jobs:
             fi
           fi
 
-      - name: Generate curriculum cards, video & captions
+      - name: Generate curriculum cards, 30fps video & optional direct TikTok publish
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ZERNIO_API_KEY: ${{ secrets.ZERNIO_API_KEY }}
         run: |
           APP_DIR="."
           if [ -f "thanaweya-autopilot/autopilot.py" ]; then
@@ -81,20 +84,89 @@ jobs:
           python "$APP_DIR/autopilot.py" \
             --slot "${{ steps.slot.outputs.slot }}" \
             --out-dir /tmp/autopilot_out \
-            --cdn-base "https://raw.githubusercontent.com/${{ github.repository }}/media-cdn/latest"
+            --cdn-base "__CDN_BASE__"
 
-      - name: Publish clean media to orphan media-cdn branch (0 repo bloat forever)
+      - name: Publish media to media-cdn (retaining recent slots + 0 history bloat)
+        id: cdn
         run: |
-          mkdir -p /tmp/media_cdn/latest
-          cp /tmp/autopilot_out/*.jpg /tmp/media_cdn/latest/ 2>/dev/null || true
-          cp /tmp/autopilot_out/*.mp4 /tmp/media_cdn/latest/ 2>/dev/null || true
+          REPO_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          mkdir -p /tmp/prev_cdn /tmp/media_cdn/latest
+
+          # الاحتفاظ بآخر 15 ملف من الجولات السابقة حتى لا يعطي أي رابط سابق خطأ 404 أبداً
+          if git clone --depth 1 --branch media-cdn "$REPO_URL" /tmp/prev_cdn 2>/dev/null; then
+            if [ -d "/tmp/prev_cdn/latest" ]; then
+              ls -1t /tmp/prev_cdn/latest/* 2>/dev/null | head -n 15 | xargs -r -I{} cp -p "{}" /tmp/media_cdn/latest/
+            fi
+          fi
+
+          cp -f /tmp/autopilot_out/*.jpg /tmp/media_cdn/latest/ 2>/dev/null || true
+          cp -f /tmp/autopilot_out/*.mp4 /tmp/media_cdn/latest/ 2>/dev/null || true
+
           cd /tmp/media_cdn
           git init -b media-cdn
           git config user.name "thanaweya-autopilot[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "CDN media $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" media-cdn:media-cdn
+          COMMIT_SHA=$(git rev-parse HEAD)
+          git push --force "$REPO_URL" media-cdn:media-cdn
+          echo "sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Verify live HTTP 200 & video/mp4 Content-Type before calling Make.com
+        env:
+          COMMIT_SHA: ${{ steps.cdn.outputs.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          VID_FILE=$(basename $(ls /tmp/autopilot_out/*.mp4 | head -n 1))
+          JSDELIVR_BASE="https://cdn.jsdelivr.net/gh/${REPO}@${COMMIT_SHA}/latest"
+          RAW_SHA_BASE="https://raw.githubusercontent.com/${REPO}/${COMMIT_SHA}/latest"
+          CHOSEN_BASE=""
+
+          echo "Checking jsDelivr CDN (serves Content-Type: video/mp4 for TikTok/IG): ${JSDELIVR_BASE}/${VID_FILE}"
+          for i in $(seq 1 10); do
+            CODE=$(curl -sIL -o /dev/null -w "%{http_code}" --max-time 10 "${JSDELIVR_BASE}/${VID_FILE}" || echo "000")
+            echo "  [Attempt $i] jsDelivr HTTP $CODE"
+            if [ "$CODE" = "200" ]; then
+              CHOSEN_BASE="$JSDELIVR_BASE"
+              break
+            fi
+            sleep 3
+          done
+
+          if [ -z "$CHOSEN_BASE" ]; then
+            echo "Fallback check on immutable GitHub Raw commit URL: ${RAW_SHA_BASE}/${VID_FILE}"
+            for i in $(seq 1 8); do
+              CODE=$(curl -sIL -o /dev/null -w "%{http_code}" --max-time 10 "${RAW_SHA_BASE}/${VID_FILE}" || echo "000")
+              echo "  [Attempt $i] GitHub Raw SHA HTTP $CODE"
+              if [ "$CODE" = "200" ]; then
+                CHOSEN_BASE="$RAW_SHA_BASE"
+                break
+              fi
+              sleep 3
+            done
+          fi
+
+          if [ -z "$CHOSEN_BASE" ]; then
+            echo "::error::تعذر الوصول العام لرابط الفيديو (HTTP 404/403)! تأكد أن مستودع GitHub مضبوط على Public وليس Private من Settings -> Change repository visibility -> Make public."
+            exit 1
+          fi
+
+          python3 - << PYEOF
+          import json
+          p_path = "/tmp/autopilot_out/webhook_payload.json"
+          with open(p_path, "r", encoding="utf-8") as f:
+              data = json.load(f)
+          chosen = "${CHOSEN_BASE}"
+          for k, v in list(data.items()):
+              if isinstance(v, str) and "__CDN_BASE__" in v:
+                  data[k] = v.replace("__CDN_BASE__", chosen)
+          # إذا تم رفع الفيديو سحابياً عبر Zernio نستخدم رابطه المباشر الفائق السرعة للفيديو أيضاً
+          if data.get("zernio_video_url", "").startswith("https://"):
+              data["video_url"] = data["zernio_video_url"]
+          with open(p_path, "w", encoding="utf-8") as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+          print("Verified live video_url ->", data["video_url"])
+          PYEOF
 
       - name: Keep-alive heartbeat on main (prevents GitHub 60-day schedule pause)
         run: |
@@ -105,16 +177,15 @@ jobs:
           git diff --cached --quiet || git commit -m "Autopilot heartbeat: ${{ steps.slot.outputs.slot }}"
           git push origin HEAD || true
 
-      - name: Wait 8s for GitHub Raw CDN edge propagation & trigger Make.com 4-Platform Publisher
+      - name: Trigger Make.com Publisher
         env:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
         run: |
-          sleep 8
           if [ -z "$MAKE_WEBHOOK_URL" ]; then
             echo "::error::MAKE_WEBHOOK_URL secret is empty! Add it in Settings -> Secrets and variables -> Actions."
             exit 1
           fi
-          HTTP_CODE=$(curl -sS -o /tmp/make_resp.txt -w "%{http_code}" \
+          HTTP_CODE=$(curl -sS --max-time 180 -o /tmp/make_resp.txt -w "%{http_code}" \
             -X POST "$MAKE_WEBHOOK_URL" \
             -H "Content-Type: application/json; charset=utf-8" \
             --data-binary @/tmp/autopilot_out/webhook_payload.json)
