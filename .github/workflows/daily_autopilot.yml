@@ -2,12 +2,18 @@ name: Thanaweya Plus Daily Autopilot
 
 on:
   schedule:
-    # 07:00 AM Cairo (05:00 UTC) -> Morning Daily Study Schedule
-    - cron: '0 5 * * *'
-    # 05:30 PM Cairo (15:30 UTC) -> Maghrib Lesson Summary & Laws
-    - cron: '30 15 * * *'
-    # 09:00 PM Cairo (19:00 UTC) -> Night 30s Countdown Challenge
-    - cron: '0 19 * * *'
+    # === الفترة الصباحية (الصبح ~07:00 ص القاهرة): أساسي في دقيقة غير مزدحمة + محاولتا أمان احتياطيتان مع قفل منع التكرار ===
+    - cron: '47 4 * * *'
+    - cron: '13 5 * * *'
+    - cron: '41 5 * * *'
+    # === فترة المغرب (المغرب ~05:30 م القاهرة): أساسي + محاولتا أمان احتياطيتان مع قفل منع التكرار ===
+    - cron: '17 15 * * *'
+    - cron: '43 15 * * *'
+    - cron: '11 16 * * *'
+    # === فترة السهرة (بليل ~09:00 م القاهرة): أساسي + محاولتا أمان احتياطيتان مع قفل منع التكرار ===
+    - cron: '47 18 * * *'
+    - cron: '13 19 * * *'
+    - cron: '41 19 * * *'
   workflow_dispatch:
     inputs:
       slot:
@@ -35,14 +41,52 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine slot & check idempotency lock (zero duplicate scheduled runs)
+        id: slot
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SLOT="${{ github.event.inputs.slot }}"
+          else
+            UTC_HOUR=$((10#$(date -u +%H)))
+            if [ "$UTC_HOUR" -lt 11 ]; then
+              SLOT="morning"
+            elif [ "$UTC_HOUR" -lt 18 ]; then
+              SLOT="maghrib"
+            else
+              SLOT="night"
+            fi
+          fi
+          TODAY_CAIRO=$(TZ=Africa/Cairo date +%Y-%m-%d)
+          LOCK_KEY="${TODAY_CAIRO}|${SLOT}"
+          echo "slot=${SLOT}" >> $GITHUB_OUTPUT
+          echo "lock_key=${LOCK_KEY}" >> $GITHUB_OUTPUT
+
+          git fetch origin main 2>/dev/null || true
+          LOCK_FILE="published_slots.log"
+          if [ -f "thanaweya-autopilot/published_slots.log" ]; then
+            LOCK_FILE="thanaweya-autopilot/published_slots.log"
+          fi
+
+          if [ "${{ github.event_name }}" = "schedule" ] && grep -Fxq "${LOCK_KEY}" "$LOCK_FILE" 2>/dev/null; then
+            echo "Already published ${LOCK_KEY} today — backup schedule check complete without re-posting."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Proceeding to publish ${LOCK_KEY} (event=${{ github.event_name }})"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Set up Python 3.11 (with pip cache)
+        if: steps.slot.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
       - name: Install Arabic shaping library (libraqm0) & FFmpeg
+        if: steps.slot.outputs.skip != 'true' && steps.slot.outputs.slot != 'tiktok_comment_sync'
         run: |
           if ! dpkg -s libraqm0 >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
             sudo apt-get update -y
@@ -50,6 +94,7 @@ jobs:
           fi
 
       - name: Install Python dependencies
+        if: steps.slot.outputs.skip != 'true'
         run: |
           REQ_FILE="requirements.txt"
           if [ -f "thanaweya-autopilot/requirements.txt" ]; then
@@ -57,23 +102,8 @@ jobs:
           fi
           pip install -r "$REQ_FILE"
 
-      - name: Determine time slot (Morning / Maghrib / Night)
-        id: slot
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "slot=${{ github.event.inputs.slot }}" >> $GITHUB_OUTPUT
-          else
-            UTC_HOUR=$((10#$(date -u +%H)))
-            if [ "$UTC_HOUR" -lt 11 ]; then
-              echo "slot=morning" >> $GITHUB_OUTPUT
-            elif [ "$UTC_HOUR" -lt 18 ]; then
-              echo "slot=maghrib" >> $GITHUB_OUTPUT
-            else
-              echo "slot=night" >> $GITHUB_OUTPUT
-            fi
-          fi
-
-      - name: Generate curriculum cards, 30fps video & optional direct TikTok publish
+      - name: Stage curriculum cards & 30fps video (nothing published yet)
+        if: steps.slot.outputs.skip != 'true'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           ZERNIO_API_KEY: ${{ secrets.ZERNIO_API_KEY }}
@@ -85,16 +115,17 @@ jobs:
           python "$APP_DIR/autopilot.py" \
             --slot "${{ steps.slot.outputs.slot }}" \
             --out-dir /tmp/autopilot_out \
-            --cdn-base "__CDN_BASE__"
+            --cdn-base "__CDN_BASE__" \
+            --stage-only
 
-      - name: Publish media to media-cdn (retaining recent slots + 0 history bloat)
-        if: steps.slot.outputs.slot != 'tiktok_comment_sync'
-        id: cdn
+      - name: Stage media to media-cdn & verify jsDelivr HTTP 200 before firing platforms
+        if: steps.slot.outputs.skip != 'true' && steps.slot.outputs.slot != 'tiktok_comment_sync'
+        env:
+          REPO: ${{ github.repository }}
         run: |
           REPO_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           mkdir -p /tmp/prev_cdn /tmp/media_cdn/latest
 
-          # الاحتفاظ بآخر 15 ملف من الجولات السابقة حتى لا يعطي أي رابط سابق خطأ 404 أبداً
           if git clone --depth 1 --branch media-cdn "$REPO_URL" /tmp/prev_cdn 2>/dev/null; then
             if [ -d "/tmp/prev_cdn/latest" ]; then
               ls -1t /tmp/prev_cdn/latest/* 2>/dev/null | head -n 15 | xargs -r -I{} cp -p "{}" /tmp/media_cdn/latest/
@@ -112,20 +143,13 @@ jobs:
           git commit -m "CDN media $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           COMMIT_SHA=$(git rev-parse HEAD)
           git push --force "$REPO_URL" media-cdn:media-cdn
-          echo "sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
 
-      - name: Verify live HTTP 200 & video/mp4 Content-Type before calling Make.com
-        if: steps.slot.outputs.slot != 'tiktok_comment_sync'
-        env:
-          COMMIT_SHA: ${{ steps.cdn.outputs.sha }}
-          REPO: ${{ github.repository }}
-        run: |
           VID_FILE=$(basename $(ls /tmp/autopilot_out/*.mp4 | head -n 1))
           JSDELIVR_BASE="https://cdn.jsdelivr.net/gh/${REPO}@${COMMIT_SHA}/latest"
           RAW_SHA_BASE="https://raw.githubusercontent.com/${REPO}/${COMMIT_SHA}/latest"
           CHOSEN_BASE=""
 
-          echo "Checking jsDelivr CDN (serves Content-Type: video/mp4 for TikTok/IG): ${JSDELIVR_BASE}/${VID_FILE}"
+          echo "Checking jsDelivr CDN: ${JSDELIVR_BASE}/${VID_FILE}"
           for i in $(seq 1 10); do
             CODE=$(curl -sIL -o /dev/null -w "%{http_code}" --max-time 10 "${JSDELIVR_BASE}/${VID_FILE}" || echo "000")
             echo "  [Attempt $i] jsDelivr HTTP $CODE"
@@ -137,10 +161,8 @@ jobs:
           done
 
           if [ -z "$CHOSEN_BASE" ]; then
-            echo "Fallback check on immutable GitHub Raw commit URL: ${RAW_SHA_BASE}/${VID_FILE}"
             for i in $(seq 1 8); do
               CODE=$(curl -sIL -o /dev/null -w "%{http_code}" --max-time 10 "${RAW_SHA_BASE}/${VID_FILE}" || echo "000")
-              echo "  [Attempt $i] GitHub Raw SHA HTTP $CODE"
               if [ "$CODE" = "200" ]; then
                 CHOSEN_BASE="$RAW_SHA_BASE"
                 break
@@ -150,7 +172,7 @@ jobs:
           fi
 
           if [ -z "$CHOSEN_BASE" ]; then
-            echo "::error::تعذر الوصول العام لرابط الفيديو (HTTP 404/403)! تأكد أن مستودع GitHub مضبوط على Public وليس Private من Settings -> Change repository visibility -> Make public."
+            echo "::error::تعذر الوصول العام لرابط الفيديو (HTTP 404/403)! تأكد أن مستودع GitHub مضبوط على Public."
             exit 1
           fi
 
@@ -163,38 +185,43 @@ jobs:
           for k, v in list(data.items()):
               if isinstance(v, str) and "__CDN_BASE__" in v:
                   data[k] = v.replace("__CDN_BASE__", chosen)
-          # نحافظ على رابط jsDelivr الدائم (@COMMIT_SHA) حتى لا تنتهي صلاحيته أبداً
-          if not str(data.get("video_url", "")).startswith("https://") and data.get("zernio_video_url", "").startswith("https://"):
-              data["video_url"] = data["zernio_video_url"]
           with open(p_path, "w", encoding="utf-8") as f:
               json.dump(data, f, ensure_ascii=False, indent=2)
-          print("Verified live video_url ->", data["video_url"])
+          print("Staged live video_url ->", data["video_url"])
           PYEOF
 
-      - name: Keep-alive heartbeat on main (prevents GitHub 60-day schedule pause)
-        if: steps.slot.outputs.slot != 'tiktok_comment_sync'
+      - name: Simultaneous Parallel Blast (TikTok + YouTube + Facebook + Instagram at T=0!)
+        if: steps.slot.outputs.skip != 'true' && steps.slot.outputs.slot != 'tiktok_comment_sync'
+        env:
+          ZERNIO_API_KEY: ${{ secrets.ZERNIO_API_KEY }}
+          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
+        run: |
+          APP_DIR="."
+          if [ -f "thanaweya-autopilot/zernio_publisher.py" ]; then
+            APP_DIR="thanaweya-autopilot"
+          fi
+          VID_PATH=$(ls /tmp/autopilot_out/*.mp4 | head -n 1)
+          python "$APP_DIR/zernio_publisher.py" \
+            --blast \
+            --payload /tmp/autopilot_out/webhook_payload.json \
+            --video "$VID_PATH"
+
+      - name: Record published slot lock & keep-alive heartbeat on main
+        if: steps.slot.outputs.skip != 'true' && steps.slot.outputs.slot != 'tiktok_comment_sync'
         run: |
           git config user.name "thanaweya-autopilot[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          echo "Last run: $(TZ=Africa/Cairo date) | Slot: ${{ steps.slot.outputs.slot }}" > last_run.txt
-          git add last_run.txt
-          git diff --cached --quiet || git commit -m "Autopilot heartbeat: ${{ steps.slot.outputs.slot }}"
-          git push origin HEAD || true
+          git pull --rebase origin main || true
 
-      - name: Trigger Make.com Publisher
-        if: steps.slot.outputs.slot != 'tiktok_comment_sync'
-        env:
-          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
-        run: |
-          if [ -z "$MAKE_WEBHOOK_URL" ]; then
-            echo "::error::MAKE_WEBHOOK_URL secret is empty! Add it in Settings -> Secrets and variables -> Actions."
-            exit 1
+          LOCK_FILE="published_slots.log"
+          if [ -f "thanaweya-autopilot/published_slots.log" ]; then
+            LOCK_FILE="thanaweya-autopilot/published_slots.log"
           fi
-          HTTP_CODE=$(curl -sS --max-time 180 -o /tmp/make_resp.txt -w "%{http_code}" \
-            -X POST "$MAKE_WEBHOOK_URL" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            --data-binary @/tmp/autopilot_out/webhook_payload.json)
-          echo "Make.com response ($HTTP_CODE): $(cat /tmp/make_resp.txt)"
-          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
-            exit 1
-          fi
+          touch "$LOCK_FILE"
+          grep -Fxq "${{ steps.slot.outputs.lock_key }}" "$LOCK_FILE" || echo "${{ steps.slot.outputs.lock_key }}" >> "$LOCK_FILE"
+          tail -n 60 "$LOCK_FILE" > "${LOCK_FILE}.tmp" && mv "${LOCK_FILE}.tmp" "$LOCK_FILE"
+
+          echo "Last run: $(TZ=Africa/Cairo date) | Slot: ${{ steps.slot.outputs.slot }}" > last_run.txt
+          git add "$LOCK_FILE" last_run.txt
+          git diff --cached --quiet || git commit -m "Autopilot published: ${{ steps.slot.outputs.lock_key }}"
+          git push origin HEAD || true

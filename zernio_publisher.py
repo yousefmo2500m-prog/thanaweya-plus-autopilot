@@ -11,7 +11,10 @@
 
 from __future__ import annotations
 
+import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import re
 import time
 import urllib.error
@@ -472,3 +475,243 @@ def publish_video_to_tiktok_direct(video_path: Path, caption: str, api_key: str)
         api_key=api_key,
     )
     return {"ok": r.get("tiktok_ok", False), "zernio_video_url": r.get("zernio_video_url", "")}
+
+
+def _trigger_make_webhook(make_url: str, payload: Dict[str, Any]) -> tuple[int, str]:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        make_url,
+        data=body,
+        headers={
+            "Content-Type": "application/json; charset=utf-8",
+            "User-Agent": "ThanaweyaPlus-Autopilot/3.5",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            return resp.getcode(), resp.read().decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", errors="ignore")
+
+
+def blast_simultaneous_all_platforms(
+    payload_path: Path,
+    video_path: Path,
+    zernio_key: str,
+    make_webhook_url: str,
+) -> None:
+    """
+    يطلق النشر المتزامن المتوازي (Simultaneous Blast) على جميع المنصات في نفس الثانية (صفر تفاوت زمني!):
+      1) يجهز ملف الفيديو مسبقاً على تخزين Zernio السحابي بدون نشر.
+      2) عند اللحظة T=0: يطلق نشر تيك توك + يوتيوب Shorts (مع أول تعليق مثبت) بالتوازي معاً (~2 ثانية فقط).
+      3) عند اللحظة T=+2s فوراً (دون انتظار فهرسة تعليق تيك توك!): يطلق ويبهوك Make (فيسبوك + إنستجرام)
+         بالتوازي مع خيط مستقل ينتظر فهرسة تيك توك ويكتب ويثبت أول تعليق!
+    """
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload["tiktok_published_direct"] = "false"
+    payload["youtube_published_direct"] = "false"
+    payload["instagram_published_direct"] = "false"
+
+    tk_comment_ctx: Optional[Dict[str, Any]] = None
+
+    if zernio_key:
+        try:
+            print("[Simultaneous Blast] Pre-staging MP4 to Zernio cloud storage before firing any platform...")
+            zernio_public_url = upload_mp4_to_zernio_storage(video_path, zernio_key)
+            payload["zernio_video_url"] = zernio_public_url
+            if not str(payload.get("video_url", "")).startswith("https://"):
+                payload["video_url"] = zernio_public_url
+
+            accounts = list_connected_accounts(zernio_key)
+            print(f"[Simultaneous Blast] Connected Zernio platforms ready: {list(accounts.keys())}")
+
+            before_tk_ids: Set[str] = set()
+            tk_privacy = "PUBLIC_TO_EVERYONE"
+            if "tiktok" in accounts:
+                before_tk_ids = set(_get_recent_platform_post_ids(accounts["tiktok"], zernio_key))
+                tk_privacy = choose_allowed_privacy(accounts["tiktok"], zernio_key)
+
+            def _fire_tiktok() -> Dict[str, Any]:
+                tk_acc = accounts["tiktok"]
+                tk_body: Dict[str, Any] = {
+                    "content": str(payload.get("tiktok_caption", ""))[:2100],
+                    "mediaItems": [{"type": "video", "url": zernio_public_url}],
+                    "platforms": [{"platform": "tiktok", "accountId": tk_acc}],
+                    "tiktokSettings": {
+                        "privacy_level": tk_privacy,
+                        "allow_comment": True,
+                        "allow_duet": True,
+                        "allow_stitch": True,
+                        "video_cover_timestamp_ms": 1500,
+                        "content_preview_confirmed": True,
+                        "express_consent_given": True,
+                    },
+                    "publishNow": True,
+                }
+                st, rsp = _zernio_json_request("POST", "/posts", zernio_key, payload=tk_body, timeout=180)
+                p_obj = rsp.get("post", {}) if isinstance(rsp, dict) else {}
+                p_status = str(p_obj.get("status", ""))
+                if st == 207 or p_status == "failed":
+                    errs = " | ".join(
+                        p.get("errorMessage", "") for p in (p_obj.get("platforms") or []) if isinstance(p, dict)
+                    ) or str(rsp)
+                    print(f"[TikTok Blast] Returned ({st}): {errs}")
+                    if "capacity" in errs.lower() or "active user" in errs.lower():
+                        tk_body["tiktokSettings"]["draft"] = True
+                        s2, _ = _zernio_json_request("POST", "/posts", zernio_key, payload=tk_body, timeout=180)
+                        return {"ok": s2 in (200, 201), "post_id": "", "native_id": ""}
+                    return {"ok": False, "post_id": "", "native_id": ""}
+                if st in (200, 201, 202):
+                    z_pid = str(p_obj.get("_id") or "")
+                    nat_id = ""
+                    for pe in (p_obj.get("platforms") or []):
+                        if isinstance(pe, dict) and pe.get("platform") == "tiktok":
+                            nat_id = str(pe.get("platformPostId") or pe.get("postId") or "")
+                    print(f"[TikTok Blast] Launched at T=0! post_id={z_pid}")
+                    return {"ok": True, "post_id": z_pid, "native_id": nat_id}
+                return {"ok": False, "post_id": "", "native_id": ""}
+
+            def _fire_youtube() -> Dict[str, Any]:
+                yt_acc = accounts["youtube"]
+                yt_body: Dict[str, Any] = {
+                    "content": str(payload.get("youtube_description", ""))[:4800],
+                    "tags": ["ثانويتي بلس", "الثانوية العامة", "البكالوريا المصرية", "اولى ثانوي", "تانية ثانوي", "تالتة ثانوي"],
+                    "mediaItems": [{"type": "video", "url": zernio_public_url}],
+                    "platforms": [
+                        {
+                            "platform": "youtube",
+                            "accountId": yt_acc,
+                            "platformSpecificData": {
+                                "title": str(payload.get("youtube_title", ""))[:95],
+                                "visibility": "public",
+                                "categoryId": "27",
+                                "madeForKids": False,
+                                "containsSyntheticMedia": False,
+                                "firstComment": str(payload.get("first_comment", ""))[:2000],
+                            },
+                        }
+                    ],
+                    "publishNow": True,
+                }
+                ys, yrsp = _zernio_json_request("POST", "/posts", zernio_key, payload=yt_body, timeout=180)
+                ypost = yrsp.get("post", {}) if isinstance(yrsp, dict) else {}
+                if ys in (200, 201, 202) and str(ypost.get("status", "")) != "failed":
+                    print(f"[YouTube Blast + FirstComment] Launched at T=0! post_id={ypost.get('_id')}")
+                    return {"ok": True, "quota_capped": False}
+                err_txt = str(yrsp)
+                capped = "daily upload limit" in err_txt.lower() or "quota" in err_txt.lower()
+                if capped:
+                    print(
+                        "[YouTube Blast Notice] YouTube 24h daily upload cap reached on this channel from test runs "
+                        "— skipping duplicate Make retry; normal 3/day schedule resumes automatically once 24h window resets."
+                    )
+                else:
+                    print(f"[YouTube Blast Warning] ({ys}): {yrsp}")
+                return {"ok": False, "quota_capped": capped}
+
+            def _fire_instagram() -> bool:
+                ig_acc = accounts["instagram"]
+                ig_body: Dict[str, Any] = {
+                    "content": str(payload.get("instagram_caption", ""))[:2100],
+                    "mediaItems": [{"type": "video", "url": zernio_public_url}],
+                    "platforms": [
+                        {
+                            "platform": "instagram",
+                            "accountId": ig_acc,
+                            "platformSpecificData": {
+                                "shareToFeed": True,
+                                "firstComment": str(payload.get("first_comment", ""))[:2000],
+                            },
+                        }
+                    ],
+                    "publishNow": True,
+                }
+                igs, igrsp = _zernio_json_request("POST", "/posts", zernio_key, payload=ig_body, timeout=180)
+                igpost = igrsp.get("post", {}) if isinstance(igrsp, dict) else {}
+                ok = igs in (200, 201, 202) and str(igpost.get("status", "")) != "failed"
+                if ok:
+                    print(f"[Instagram Blast + FirstComment] Launched at T=0! post_id={igpost.get('_id')}")
+                return ok
+
+            # === الإطلاق المتوازي الفوري عند اللحظة T=0 ===
+            print("[Simultaneous Blast] >>> FIRING ZERNIO PLATFORMS IN PARALLEL AT T=0 <<<")
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                fut_tk = pool.submit(_fire_tiktok) if "tiktok" in accounts else None
+                fut_yt = pool.submit(_fire_youtube) if "youtube" in accounts else None
+                fut_ig = pool.submit(_fire_instagram) if "instagram" in accounts else None
+
+                if fut_tk is not None:
+                    tk_res = fut_tk.result()
+                    if tk_res.get("ok"):
+                        payload["tiktok_published_direct"] = "true"
+                        tk_comment_ctx = {
+                            "account_id": accounts["tiktok"],
+                            "zernio_post_id": tk_res.get("post_id", ""),
+                            "before_ids": before_tk_ids,
+                            "native_id": tk_res.get("native_id", ""),
+                        }
+                if fut_yt is not None:
+                    yt_res = fut_yt.result()
+                    if yt_res.get("ok") or yt_res.get("quota_capped"):
+                        payload["youtube_published_direct"] = "true"
+                if fut_ig is not None and fut_ig.result():
+                    payload["instagram_published_direct"] = "true"
+
+        except Exception as z_exc:
+            print(f"[Simultaneous Blast Zernio Warning] {z_exc} — Make fallback routes remain active.")
+
+    payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # === في اللحظة T=+2s فوراً: إطلاق Make (فيسبوك + إنستجرام) بالتوازي مع تثبيت تعليق تيك توك! ===
+    def _run_make() -> tuple[int, str]:
+        if not make_webhook_url:
+            raise RuntimeError("MAKE_WEBHOOK_URL secret is empty!")
+        print("[Simultaneous Blast] >>> FIRING MAKE.COM (FACEBOOK + INSTAGRAM) IN PARALLEL <<<")
+        code, resp_txt = _trigger_make_webhook(make_webhook_url, payload)
+        print(f"Make.com response ({code}): {resp_txt}")
+        return code, resp_txt
+
+    def _run_tk_comment_pin() -> None:
+        if not tk_comment_ctx:
+            return
+        try:
+            _post_and_pin_tiktok_first_comment(
+                account_id=tk_comment_ctx["account_id"],
+                zernio_post_id=tk_comment_ctx["zernio_post_id"],
+                before_ids=tk_comment_ctx["before_ids"],
+                native_publish_id=tk_comment_ctx["native_id"],
+                first_comment=str(payload.get("first_comment", "")),
+                api_key=zernio_key,
+            )
+            backfill_recent_tiktok_comments(
+                tk_comment_ctx["account_id"],
+                str(payload.get("first_comment", "")),
+                zernio_key,
+                max_posts=2,
+            )
+        except Exception as ce:
+            print(f"[TikTok First Comment Warning] {ce}")
+
+    with ThreadPoolExecutor(max_workers=2) as pool2:
+        f_make = pool2.submit(_run_make)
+        f_tk_pin = pool2.submit(_run_tk_comment_pin)
+        make_code, make_txt = f_make.result()
+        f_tk_pin.result()
+
+    if make_code < 200 or make_code >= 300:
+        raise SystemExit(f"Make.com webhook failed with HTTP {make_code}: {make_txt}")
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Simultaneous Multi-Platform Blast Publisher")
+    ap.add_argument("--blast", action="store_true")
+    ap.add_argument("--payload", required=True)
+    ap.add_argument("--video", required=True)
+    cli_args = ap.parse_args()
+    blast_simultaneous_all_platforms(
+        payload_path=Path(cli_args.payload),
+        video_path=Path(cli_args.video),
+        zernio_key=os.environ.get("ZERNIO_API_KEY", "").strip(),
+        make_webhook_url=os.environ.get("MAKE_WEBHOOK_URL", "").strip(),
+    )

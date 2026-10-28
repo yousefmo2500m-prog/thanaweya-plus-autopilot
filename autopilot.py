@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Dict, Any, List
+from zoneinfo import ZoneInfo
 
 from curriculum_2026_2027 import get_daily_curriculum_plan
 from studio_renderer import (
@@ -837,13 +838,14 @@ def main() -> None:
     parser.add_argument("--out-dir", default="media/latest")
     parser.add_argument("--cdn-base", default="https://raw.githubusercontent.com/OWNER/REPO/media-cdn/latest")
     parser.add_argument("--date", default="", help="Optional YYYY-MM-DD override for testing")
+    parser.add_argument("--stage-only", action="store_true", help="Generate cards, MP4 & payload without publishing yet (for simultaneous parallel blast)")
     args = parser.parse_args()
 
     api_key = os.environ.get("GROQ_API_KEY", "").strip()
-    if not api_key:
+    if args.slot != "tiktok_comment_sync" and not api_key:
         raise SystemExit("ERROR: GROQ_API_KEY environment variable is required.")
 
-    cairo_tz = datetime.timezone(datetime.timedelta(hours=2))
+    cairo_tz = ZoneInfo("Africa/Cairo")
     if args.date:
         y, m, d = [int(x) for x in args.date.split("-")]
         now = datetime.datetime(y, m, d, 12, 0, tzinfo=cairo_tz)
@@ -894,7 +896,7 @@ def main() -> None:
     payload["youtube_published_direct"] = "false"
     payload["instagram_published_direct"] = "false"
     zernio_key = os.environ.get("ZERNIO_API_KEY", "").strip()
-    if zernio_key:
+    if zernio_key and not args.stage_only:
         mp4_files = sorted(out_dir.glob("*.mp4"))
         if mp4_files:
             try:
