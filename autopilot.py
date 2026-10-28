@@ -833,7 +833,7 @@ def build_night_slot(plan: Dict[str, Any], api_key: str, out_dir: Path, cdn_base
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Thanaweya Plus Daily Autopilot Engine v3")
-    parser.add_argument("--slot", choices=["morning", "maghrib", "night", "auto"], default="auto")
+    parser.add_argument("--slot", choices=["morning", "maghrib", "night", "auto", "tiktok_comment_sync"], default="auto")
     parser.add_argument("--out-dir", default="media/latest")
     parser.add_argument("--cdn-base", default="https://raw.githubusercontent.com/OWNER/REPO/media-cdn/latest")
     parser.add_argument("--date", default="", help="Optional YYYY-MM-DD override for testing")
@@ -851,6 +851,22 @@ def main() -> None:
         now = datetime.datetime.now(cairo_tz)
 
     slot = args.slot
+    if slot == "tiktok_comment_sync":
+        zernio_key = os.environ.get("ZERNIO_API_KEY", "").strip()
+        if not zernio_key:
+            raise SystemExit("ERROR: ZERNIO_API_KEY is required for tiktok_comment_sync.")
+        from zernio_publisher import list_connected_accounts, backfill_recent_tiktok_comments
+        accs = list_connected_accounts(zernio_key)
+        print(f"[TikTok Sync] Connected Zernio accounts: {accs}")
+        if "tiktok" in accs:
+            default_comment = (
+                f"🚀 ادخل دلوقتي على منصة «ثانويتي بلس» مجاناً بالكامل من هنا:\n{SITE_URL}\n"
+                "✅ جدول المهام اليومي + بنك الأسئلة + كروت أنكي + مصحح التمارين بالصور + المدرس الذكي لكل الصفوف والمسارات!"
+            )
+            res = backfill_recent_tiktok_comments(accs["tiktok"], default_comment, zernio_key, max_posts=5)
+            print(f"[TikTok Sync] Result: {res}")
+        return
+
     if slot == "auto":
         if now.hour < 13:
             slot = "morning"

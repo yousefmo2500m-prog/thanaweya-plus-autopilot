@@ -19,6 +19,7 @@ on:
           - morning
           - maghrib
           - night
+          - tiktok_comment_sync
 
 permissions:
   contents: write
@@ -87,6 +88,7 @@ jobs:
             --cdn-base "__CDN_BASE__"
 
       - name: Publish media to media-cdn (retaining recent slots + 0 history bloat)
+        if: steps.slot.outputs.slot != 'tiktok_comment_sync'
         id: cdn
         run: |
           REPO_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
@@ -113,6 +115,7 @@ jobs:
           echo "sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
 
       - name: Verify live HTTP 200 & video/mp4 Content-Type before calling Make.com
+        if: steps.slot.outputs.slot != 'tiktok_comment_sync'
         env:
           COMMIT_SHA: ${{ steps.cdn.outputs.sha }}
           REPO: ${{ github.repository }}
@@ -169,6 +172,7 @@ jobs:
           PYEOF
 
       - name: Keep-alive heartbeat on main (prevents GitHub 60-day schedule pause)
+        if: steps.slot.outputs.slot != 'tiktok_comment_sync'
         run: |
           git config user.name "thanaweya-autopilot[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -178,6 +182,7 @@ jobs:
           git push origin HEAD || true
 
       - name: Trigger Make.com Publisher
+        if: steps.slot.outputs.slot != 'tiktok_comment_sync'
         env:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
         run: |

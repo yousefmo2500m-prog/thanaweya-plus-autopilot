@@ -122,22 +122,132 @@ def choose_allowed_privacy(account_id: str, api_key: str) -> str:
     return "PUBLIC_TO_EVERYONE"
 
 
-def _get_recent_platform_post_ids(account_id: str, api_key: str) -> List[str]:
-    """يجلب أحدث معرفات المنشورات الرقمية الحية مباشرة من المنصة عبر GET /v1/accounts/{accountId}/posts."""
-    status, data = _zernio_json_request("GET", f"/accounts/{account_id}/posts", api_key, timeout=30)
-    if status != 200 or not isinstance(data, dict):
-        return []
-    posts = data.get("posts") or []
-    out: List[str] = []
-    for p in posts:
-        if not isinstance(p, dict):
+def _extract_valid_tiktok_video_ids_from_posts_payload(data: Any) -> List[str]:
+    """يستخرج فقط المعرّفات الرقمية الحقيقية لفيديوهات تيك توك (وليس v_pub_url~v2 المؤقتة!)."""
+    found: List[str] = []
+    if not isinstance(data, dict):
+        return found
+    rows = data.get("posts") or data.get("data") or []
+    if not isinstance(rows, list):
+        return found
+    for row in rows:
+        if not isinstance(row, dict):
             continue
-        raw_id = str(p.get("id") or "").strip()
-        permalink = str(p.get("permalink") or p.get("url") or "").strip()
-        for num in re.findall(r"\d{15,22}", f"{raw_id} {permalink}"):
-            if num not in out:
-                out.append(num)
+        # 1) فحص حقل id المباشر إن كان رقماً خالصاً (وليس v_pub_url~v2)
+        raw_id = str(row.get("id") or "").strip()
+        if raw_id.isdigit() and 15 <= len(raw_id) <= 22 and raw_id not in found:
+            found.append(raw_id)
+        # 2) فحص روابط permalink / platformPostUrl الحقيقية (/video/<digits>)
+        for url_field in ("permalink", "platformPostUrl", "url"):
+            u_val = str(row.get(url_field) or "")
+            for m in re.findall(r"/video/(\d{15,22})", u_val):
+                if m not in found:
+                    found.append(m)
+        # 3) فحص مصفوفة platforms[] داخل كائن المنشور في Zernio
+        for pe in (row.get("platforms") or []):
+            if not isinstance(pe, dict) or pe.get("platform") != "tiktok":
+                continue
+            p_url = str(pe.get("platformPostUrl") or pe.get("url") or "")
+            for m in re.findall(r"/video/(\d{15,22})", p_url):
+                if m not in found:
+                    found.append(m)
+            p_id = str(pe.get("platformPostId") or "").strip()
+            if p_id.isdigit() and 15 <= len(p_id) <= 22 and p_id not in found:
+                found.append(p_id)
+    return found
+
+
+def _get_recent_platform_post_ids(account_id: str, api_key: str, include_inbox: bool = False) -> List[str]:
+    """يجلب أحدث المعرّفات الرقمية الحقيقية لفيديوهات تيك توك المنشورة عبر مسارات Zernio المعتمدة."""
+    out: List[str] = []
+    endpoints = [
+        f"/posts?accountId={account_id}&limit=8",
+        f"/accounts/{account_id}/posts",
+        "/analytics?platform=tiktok",
+    ]
+    if include_inbox:
+        endpoints.append(f"/inbox/comments?platform=tiktok&accountId={account_id}&limit=8")
+
+    for ep in endpoints:
+        st, data = _zernio_json_request("GET", ep, api_key, timeout=30)
+        if st == 200:
+            for vid in _extract_valid_tiktok_video_ids_from_posts_payload(data):
+                if vid not in out:
+                    out.append(vid)
     return out
+
+
+def _post_and_pin_single_video(account_id: str, vid_id: str, first_comment: str, api_key: str) -> Dict[str, Any]:
+    """ينشر التعليق الأول ويثبّته على معرّف فيديو تيك توك رقمي مؤكد."""
+    for attempt in range(2):
+        idem_key = f"tk-c-{vid_id}-{attempt}-{uuid.uuid4().hex[:6]}"
+        c_status, c_resp = _zernio_json_request(
+            "POST",
+            f"/inbox/comments/{vid_id}",
+            api_key,
+            payload={"accountId": account_id, "message": first_comment[:1400]},
+            timeout=45,
+            extra_headers={"Idempotency-Key": idem_key},
+        )
+        if c_status in (200, 201):
+            c_data = c_resp.get("data", {}) if isinstance(c_resp, dict) else {}
+            comment_id = str(c_data.get("commentId") or c_resp.get("commentId") or "")
+            print(f"[TikTok First Comment] Posted successfully on VideoId={vid_id}! commentId={comment_id}")
+            pinned = False
+            if comment_id:
+                time.sleep(2)
+                p_status, p_resp = _zernio_json_request(
+                    "POST",
+                    f"/inbox/comments/{vid_id}/{comment_id}/pin",
+                    api_key,
+                    payload={"accountId": account_id},
+                    timeout=30,
+                )
+                pinned = p_status in (200, 201)
+                print(f"[TikTok Pin Comment] Pin status={p_status} pinned={pinned} resp={p_resp}")
+            return {"commented": True, "pinned": pinned, "commentId": comment_id, "videoId": vid_id}
+
+        print(f"[TikTok First Comment] Attempt {attempt + 1} on VideoId={vid_id} returned ({c_status}): {c_resp}")
+        if c_status in (400, 403) and "PLATFORM_LIMITATION" in str(c_resp):
+            return {"commented": False, "reason": "tiktok_reconnect_needed_for_comments"}
+        if attempt == 0:
+            time.sleep(8)
+    return {"commented": False, "videoId": vid_id}
+
+
+def backfill_recent_tiktok_comments(
+    account_id: str,
+    first_comment: str,
+    api_key: str,
+    max_posts: int = 4,
+) -> List[Dict[str, Any]]:
+    """يتحقق من آخر فيديوهات تيك توك المفهرسة ويضيف التعليق المثبّت لأي فيديو لم يُعلّق عليه بعد (ضمان ذاتي 100%)."""
+    results: List[Dict[str, Any]] = []
+    if not first_comment.strip():
+        return results
+
+    recent_ids = _get_recent_platform_post_ids(account_id, api_key, include_inbox=True)
+    print(f"[TikTok Backfill Check] Found resolved numeric TikTok VideoIds: {recent_ids[:max_posts]}")
+
+    for vid_id in recent_ids[:max_posts]:
+        st, c_list = _zernio_json_request(
+            "GET",
+            f"/inbox/comments/{vid_id}?accountId={account_id}&limit=20",
+            api_key,
+            timeout=30,
+        )
+        if st == 200 and isinstance(c_list, dict):
+            comments = c_list.get("comments") or []
+            already_has_link = any(
+                isinstance(cm, dict) and "thanaweya-ashy.vercel.app" in str(cm.get("message") or "")
+                for cm in comments
+            )
+            if already_has_link:
+                print(f"[TikTok Backfill Check] VideoId={vid_id} already has our link comment — skipping.")
+                continue
+        res = _post_and_pin_single_video(account_id, vid_id, first_comment, api_key)
+        results.append(res)
+    return results
 
 
 def _post_and_pin_tiktok_first_comment(
@@ -148,17 +258,16 @@ def _post_and_pin_tiktok_first_comment(
     first_comment: str,
     api_key: str,
 ) -> Dict[str, Any]:
-    """ينتظر اكتمال فهرسة فيديو تيك توك وجلب المعرّف الرقمي (int VideoId) ثم ينشر أول تعليق ويثبّته (Pin)."""
+    """ينتظر اكتمال فهرسة تيك توك وظهور platformPostUrl الحقيقي ثم ينشر أول تعليق ويثبّته (Pin)."""
     if not first_comment.strip():
         return {"commented": False}
 
     candidate_numeric_ids: List[str] = []
-    latest_native_id = native_publish_id or ""
     latest_post_url = ""
 
-    # 1) استطلاع GET /v1/posts/{zernio_post_id} + GET /v1/accounts/{accountId}/posts حتى يكتمل النشر ويظهر الرقم الفعلي للفيديو
-    for poll_idx in range(8):
-        time.sleep(6)
+    # تيك توك يستغرق عادةً 45-120 ثانية لفهرسة الفيديو وتوليد رابط /video/<id> الحقيقي بدلاً من v_pub_url~v2 المؤقت
+    for poll_idx in range(14):
+        time.sleep(10)
 
         if zernio_post_id:
             p_st, p_data = _zernio_json_request("GET", f"/posts/{zernio_post_id}", api_key, timeout=30)
@@ -166,87 +275,37 @@ def _post_and_pin_tiktok_first_comment(
                 p_obj = p_data.get("post") if isinstance(p_data.get("post"), dict) else p_data
                 for pe in (p_obj.get("platforms") or []):
                     if isinstance(pe, dict) and pe.get("platform") == "tiktok":
-                        latest_native_id = str(pe.get("platformPostId") or pe.get("postId") or latest_native_id)
                         latest_post_url = str(pe.get("platformPostUrl") or pe.get("url") or latest_post_url)
                         for m in re.findall(r"/video/(\d{15,22})", latest_post_url):
                             if m not in candidate_numeric_ids:
                                 candidate_numeric_ids.append(m)
+                        p_id = str(pe.get("platformPostId") or "").strip()
+                        if p_id.isdigit() and 15 <= len(p_id) <= 22 and p_id not in candidate_numeric_ids:
+                            candidate_numeric_ids.append(p_id)
 
-        live_ids = _get_recent_platform_post_ids(account_id, api_key)
+        live_ids = _get_recent_platform_post_ids(account_id, api_key, include_inbox=(poll_idx >= 3))
         for lid in live_ids:
             if lid not in before_ids and lid not in candidate_numeric_ids:
                 candidate_numeric_ids.append(lid)
 
         if candidate_numeric_ids:
             print(
-                f"[TikTok First Comment] Poll #{poll_idx + 1}: resolved VideoId={candidate_numeric_ids[0]} "
-                f"(url={latest_post_url}, native={latest_native_id})"
+                f"[TikTok First Comment] Poll #{poll_idx + 1}: resolved real TikTok VideoId={candidate_numeric_ids[0]} "
+                f"(url={latest_post_url})"
             )
             break
 
-        # إن اكتمل رفع المنشور في Zernio وظهرت أرقام في platformPostId نلتقطها بعد مهلة الفهرسة
-        if poll_idx >= 3 and latest_native_id:
-            for m in re.findall(r"\d{15,22}", latest_native_id):
-                if m not in candidate_numeric_ids:
-                    candidate_numeric_ids.append(m)
-            if candidate_numeric_ids:
-                print(
-                    f"[TikTok First Comment] Poll #{poll_idx + 1}: extracted numeric ID={candidate_numeric_ids[0]} "
-                    f"from native={latest_native_id}"
-                )
-                break
-
-    if not candidate_numeric_ids:
-        for m in re.findall(r"\d{15,22}", f"{latest_post_url} {latest_native_id}"):
-            if m not in candidate_numeric_ids:
-                candidate_numeric_ids.append(m)
-
     if not candidate_numeric_ids:
         print(
-            f"[TikTok First Comment] Could not resolve numeric VideoId yet "
-            f"(post_id={zernio_post_id}, native={latest_native_id}, url={latest_post_url})"
+            f"[TikTok First Comment] Video still indexing after 140s (post_id={zernio_post_id}); "
+            "next slot backfill will auto-comment & pin once TikTok resolves URL."
         )
-        return {"commented": False}
+        return {"commented": False, "pending_index": True}
 
-    # 2) إرسال التعليق وتثبيته (مع إعادة المحاولة إن كان تيك توك لا يزال يفهرس الفيديو خلال الثواني الأولى)
     for vid_id in candidate_numeric_ids:
-        for attempt in range(3):
-            idem_key = f"tk-comment-{vid_id}-{attempt}-{uuid.uuid4().hex[:6]}"
-            c_status, c_resp = _zernio_json_request(
-                "POST",
-                f"/inbox/comments/{vid_id}",
-                api_key,
-                payload={
-                    "accountId": account_id,
-                    "message": first_comment[:1400],
-                },
-                timeout=45,
-                extra_headers={"Idempotency-Key": idem_key},
-            )
-            if c_status in (200, 201):
-                c_data = c_resp.get("data", {}) if isinstance(c_resp, dict) else {}
-                comment_id = str(c_data.get("commentId") or c_resp.get("commentId") or "")
-                print(f"[TikTok First Comment] Posted successfully on VideoId={vid_id}! commentId={comment_id}")
-                pinned = False
-                if comment_id:
-                    time.sleep(2)
-                    p_status, p_resp = _zernio_json_request(
-                        "POST",
-                        f"/inbox/comments/{vid_id}/{comment_id}/pin",
-                        api_key,
-                        payload={"accountId": account_id},
-                        timeout=30,
-                    )
-                    pinned = p_status in (200, 201)
-                    print(f"[TikTok Pin Comment] Pin status={p_status} pinned={pinned} resp={p_resp}")
-                return {"commented": True, "pinned": pinned, "commentId": comment_id, "videoId": vid_id}
-
-            print(f"[TikTok First Comment] Attempt {attempt + 1} on VideoId={vid_id} returned ({c_status}): {c_resp}")
-            if c_status in (400, 403) and "PLATFORM_LIMITATION" in str(c_resp):
-                return {"commented": False, "reason": "tiktok_reconnect_needed_for_comments"}
-            # إن كان الفيديو لا يزال قيد الفهرسة على تيك توك ننتظر 10 ثوانٍ ونعيد المحاولة
-            if attempt < 2:
-                time.sleep(10)
+        res = _post_and_pin_single_video(account_id, vid_id, first_comment, api_key)
+        if res.get("commented") or res.get("reason") == "tiktok_reconnect_needed_for_comments":
+            return res
 
     return {"commented": False}
 
@@ -336,6 +395,8 @@ def publish_direct_via_zernio(
                     api_key=api_key,
                 )
                 result["tiktok_comment"] = c_info
+                # تعويض تلقائي لأي فيديو سابق اكتملت فهرسته مؤخراً على تيك توك
+                backfill_recent_tiktok_comments(tk_acc, first_comment, api_key, max_posts=3)
             except Exception as ce:
                 print(f"[TikTok First Comment Warning] {ce}")
 
