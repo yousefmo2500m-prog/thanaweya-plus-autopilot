@@ -396,7 +396,7 @@ def publish_direct_via_zernio(
                 )
                 result["tiktok_comment"] = c_info
                 # تعويض تلقائي لأي فيديو سابق اكتملت فهرسته مؤخراً على تيك توك
-                backfill_recent_tiktok_comments(tk_acc, first_comment, api_key, max_posts=3)
+                backfill_recent_tiktok_comments(tk_acc, first_comment, api_key, max_posts=2)
             except Exception as ce:
                 print(f"[TikTok First Comment Warning] {ce}")
 
