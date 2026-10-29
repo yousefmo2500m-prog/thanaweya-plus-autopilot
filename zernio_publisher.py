@@ -180,8 +180,39 @@ def _get_recent_platform_post_ids(account_id: str, api_key: str, include_inbox: 
     return out
 
 
+def _resolve_commented_log_path() -> Path:
+    p1 = Path("commented_tiktok_ids.log")
+    p2 = Path("thanaweya-autopilot/commented_tiktok_ids.log")
+    if p2.exists() and not p1.exists():
+        return p2
+    return p1
+
+
+def _load_commented_tiktok_ids() -> Set[str]:
+    p = _resolve_commented_log_path()
+    if not p.exists():
+        return set()
+    return {ln.strip() for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines() if ln.strip()}
+
+
+def _save_commented_tiktok_id(vid_id: str) -> None:
+    if not vid_id:
+        return
+    p = _resolve_commented_log_path()
+    existing = _load_commented_tiktok_ids()
+    if vid_id in existing:
+        return
+    lines = [ln.strip() for ln in (p.read_text(encoding="utf-8", errors="ignore").splitlines() if p.exists() else []) if ln.strip()]
+    lines.append(vid_id)
+    p.write_text("\n".join(lines[-80:]) + "\n", encoding="utf-8")
+
+
 def _post_and_pin_single_video(account_id: str, vid_id: str, first_comment: str, api_key: str) -> Dict[str, Any]:
-    """ينشر التعليق الأول ويثبّته على معرّف فيديو تيك توك رقمي مؤكد."""
+    """ينشر التعليق الأول ويثبّته على معرّف فيديو تيك توك رقمي مؤكد مع منع التكرار 100%."""
+    if vid_id in _load_commented_tiktok_ids():
+        print(f"[TikTok First Comment] VideoId={vid_id} already recorded in commented_tiktok_ids.log — skipping duplicate.")
+        return {"commented": True, "already_recorded": True, "videoId": vid_id}
+
     for attempt in range(2):
         idem_key = f"tk-c-{vid_id}-{attempt}-{uuid.uuid4().hex[:6]}"
         c_status, c_resp = _zernio_json_request(
@@ -193,6 +224,7 @@ def _post_and_pin_single_video(account_id: str, vid_id: str, first_comment: str,
             extra_headers={"Idempotency-Key": idem_key},
         )
         if c_status in (200, 201):
+            _save_commented_tiktok_id(vid_id)
             c_data = c_resp.get("data", {}) if isinstance(c_resp, dict) else {}
             comment_id = str(c_data.get("commentId") or c_resp.get("commentId") or "")
             print(f"[TikTok First Comment] Posted successfully on VideoId={vid_id}! commentId={comment_id}")
@@ -222,17 +254,23 @@ def backfill_recent_tiktok_comments(
     account_id: str,
     first_comment: str,
     api_key: str,
-    max_posts: int = 4,
+    max_posts: int = 2,
+    exclude_ids: Optional[Set[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """يتحقق من آخر فيديوهات تيك توك المفهرسة ويضيف التعليق المثبّت لأي فيديو لم يُعلّق عليه بعد (ضمان ذاتي 100%)."""
+    """يتحقق من آخر فيديوهات تيك توك المفهرسة ويضيف التعليق المثبّت لأي فيديو لم يُعلّق عليه بعد بدون أي تكرار."""
     results: List[Dict[str, Any]] = []
     if not first_comment.strip():
         return results
 
+    already_logged = _load_commented_tiktok_ids()
+    skip_set = set(exclude_ids or set()) | already_logged
     recent_ids = _get_recent_platform_post_ids(account_id, api_key, include_inbox=True)
     print(f"[TikTok Backfill Check] Found resolved numeric TikTok VideoIds: {recent_ids[:max_posts]}")
 
     for vid_id in recent_ids[:max_posts]:
+        if vid_id in skip_set:
+            print(f"[TikTok Backfill Check] VideoId={vid_id} already commented (locked) — skipping.")
+            continue
         st, c_list = _zernio_json_request(
             "GET",
             f"/inbox/comments/{vid_id}?accountId={account_id}&limit=20",
@@ -246,7 +284,8 @@ def backfill_recent_tiktok_comments(
                 for cm in comments
             )
             if already_has_link:
-                print(f"[TikTok Backfill Check] VideoId={vid_id} already has our link comment — skipping.")
+                _save_commented_tiktok_id(vid_id)
+                print(f"[TikTok Backfill Check] VideoId={vid_id} already has our link comment — recording & skipping.")
                 continue
         res = _post_and_pin_single_video(account_id, vid_id, first_comment, api_key)
         results.append(res)
@@ -398,8 +437,8 @@ def publish_direct_via_zernio(
                     api_key=api_key,
                 )
                 result["tiktok_comment"] = c_info
-                # تعويض تلقائي لأي فيديو سابق اكتملت فهرسته مؤخراً على تيك توك
-                backfill_recent_tiktok_comments(tk_acc, first_comment, api_key, max_posts=2)
+                just_done = {str(c_info.get("videoId"))} if c_info.get("videoId") else set()
+                backfill_recent_tiktok_comments(tk_acc, first_comment, api_key, max_posts=2, exclude_ids=just_done)
             except Exception as ce:
                 print(f"[TikTok First Comment Warning] {ce}")
 
@@ -676,7 +715,7 @@ def blast_simultaneous_all_platforms(
         if not tk_comment_ctx:
             return
         try:
-            _post_and_pin_tiktok_first_comment(
+            c_info = _post_and_pin_tiktok_first_comment(
                 account_id=tk_comment_ctx["account_id"],
                 zernio_post_id=tk_comment_ctx["zernio_post_id"],
                 before_ids=tk_comment_ctx["before_ids"],
@@ -684,11 +723,13 @@ def blast_simultaneous_all_platforms(
                 first_comment=str(payload.get("first_comment", "")),
                 api_key=zernio_key,
             )
+            just_done = {str(c_info.get("videoId"))} if c_info.get("videoId") else set()
             backfill_recent_tiktok_comments(
                 tk_comment_ctx["account_id"],
                 str(payload.get("first_comment", "")),
                 zernio_key,
                 max_posts=2,
+                exclude_ids=just_done,
             )
         except Exception as ce:
             print(f"[TikTok First Comment Warning] {ce}")

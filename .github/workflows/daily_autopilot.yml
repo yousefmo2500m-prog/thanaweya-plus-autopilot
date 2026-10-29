@@ -2,26 +2,28 @@ name: Thanaweya Plus Daily Autopilot
 
 on:
   schedule:
-    # === الفترة الصباحية (الصبح ~07:00 ص القاهرة): أساسي في دقيقة غير مزدحمة + محاولتا أمان احتياطيتان مع قفل منع التكرار ===
+    # مواعيد احتياطية مبكّرة لتعويض تأخير طابور GitHub مع قفل صارم يمنع النشر الفجري أو المكرر:
+    # الصبح (Morning)
+    - cron: '17 3 * * *'
     - cron: '47 4 * * *'
-    - cron: '13 5 * * *'
-    - cron: '41 5 * * *'
-    # === فترة المغرب (المغرب ~05:30 م القاهرة): أساسي + محاولتا أمان احتياطيتان مع قفل منع التكرار ===
-    - cron: '17 15 * * *'
-    - cron: '43 15 * * *'
-    - cron: '11 16 * * *'
-    # === فترة السهرة (بليل ~09:00 م القاهرة): أساسي + محاولتا أمان احتياطيتان مع قفل منع التكرار ===
-    - cron: '47 18 * * *'
+    - cron: '23 6 * * *'
+    # المغرب (Maghrib)
+    - cron: '47 12 * * *'
+    - cron: '17 14 * * *'
+    - cron: '23 15 * * *'
+    # السهرة (Night)
+    - cron: '47 16 * * *'
+    - cron: '17 18 * * *'
     - cron: '13 19 * * *'
-    - cron: '41 19 * * *'
   workflow_dispatch:
     inputs:
       slot:
         description: 'نوع النشرة المراد إرسالها الآن'
         required: true
-        default: 'morning'
+        default: 'auto'
         type: choice
         options:
+          - auto
           - morning
           - maghrib
           - night
@@ -44,22 +46,69 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine slot & check idempotency lock (zero duplicate scheduled runs)
+      - name: Determine slot & enforce Cairo time windows + idempotency lock
         id: slot
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SLOT="${{ github.event.inputs.slot }}"
+          CAIRO_HOUR=$((10#$(TZ=Africa/Cairo date +%H)))
+          CAIRO_MIN=$((10#$(TZ=Africa/Cairo date +%M)))
+          TODAY_CAIRO=$(TZ=Africa/Cairo date +%Y-%m-%d)
+          EVENT_NAME="${{ github.event_name }}"
+          INPUT_SLOT="${{ github.event.inputs.slot }}"
+          CRON_EXPR="${{ github.event.schedule }}"
+          FORCE_MANUAL="false"
+
+          echo "Cairo now: $(TZ=Africa/Cairo date) | event=${EVENT_NAME} | input=${INPUT_SLOT} | cron=${CRON_EXPR}"
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_SLOT" != "auto" ] && [ -n "$INPUT_SLOT" ]; then
+            # تشغيل يدوي صريح لفترة محددة من لوحة GitHub
+            SLOT="$INPUT_SLOT"
+            FORCE_MANUAL="true"
+          elif [ "$EVENT_NAME" = "schedule" ]; then
+            # ربط تعبير الكرون مباشرة بالفترة المقصودة حتى لا تتحول المغرب إلى سهرة أبداً!
+            case "$CRON_EXPR" in
+              "17 3 * * *"|"47 4 * * *"|"23 6 * * *")
+                SLOT="morning"
+                # مسموح فقط بين 06:00 صباحاً و 01:30 ظهراً بتوقيت القاهرة
+                if [ "$CAIRO_HOUR" -lt 6 ] || [ "$CAIRO_HOUR" -ge 14 ]; then
+                  echo "Outside Cairo morning window (${CAIRO_HOUR}:${CAIRO_MIN}) — skipping delayed/early cron."
+                  echo "skip=true" >> $GITHUB_OUTPUT
+                  exit 0
+                fi
+                ;;
+              "47 12 * * *"|"17 14 * * *"|"23 15 * * *")
+                SLOT="maghrib"
+                # مسموح فقط بين 04:00 عصراً و 08:15 مساءً بتوقيت القاهرة
+                if [ "$CAIRO_HOUR" -lt 16 ] || [ "$CAIRO_HOUR" -ge 20 ]; then
+                  echo "Outside Cairo maghrib window (${CAIRO_HOUR}:${CAIRO_MIN}) — skipping delayed/early cron."
+                  echo "skip=true" >> $GITHUB_OUTPUT
+                  exit 0
+                fi
+                ;;
+              *)
+                SLOT="night"
+                # مسموح فقط بين 08:15 مساءً و 11:55 مساءً بتوقيت القاهرة (ممنوع النشر بعد منتصف الليل نهائياً!)
+                if [ "$CAIRO_HOUR" -lt 20 ]; then
+                  echo "Outside Cairo night window (${CAIRO_HOUR}:${CAIRO_MIN}) — skipping early/after-midnight cron."
+                  echo "skip=true" >> $GITHUB_OUTPUT
+                  exit 0
+                fi
+                ;;
+            esac
           else
-            UTC_HOUR=$((10#$(date -u +%H)))
-            if [ "$UTC_HOUR" -lt 11 ]; then
+            # استدعاء خارجي دقيق عبر API (slot=auto من منبّه Make أو Cron خارجي)
+            if [ "$CAIRO_HOUR" -lt 6 ]; then
+              echo "Cairo quiet hours (00:00-05:59) — skipping auto trigger."
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            elif [ "$CAIRO_HOUR" -lt 14 ]; then
               SLOT="morning"
-            elif [ "$UTC_HOUR" -lt 18 ]; then
+            elif [ "$CAIRO_HOUR" -lt 20 ]; then
               SLOT="maghrib"
             else
               SLOT="night"
             fi
           fi
-          TODAY_CAIRO=$(TZ=Africa/Cairo date +%Y-%m-%d)
+
           LOCK_KEY="${TODAY_CAIRO}|${SLOT}"
           echo "slot=${SLOT}" >> $GITHUB_OUTPUT
           echo "lock_key=${LOCK_KEY}" >> $GITHUB_OUTPUT
@@ -70,11 +119,11 @@ jobs:
             LOCK_FILE="thanaweya-autopilot/published_slots.log"
           fi
 
-          if [ "${{ github.event_name }}" = "schedule" ] && grep -Fxq "${LOCK_KEY}" "$LOCK_FILE" 2>/dev/null; then
-            echo "Already published ${LOCK_KEY} today — backup schedule check complete without re-posting."
+          if [ "$FORCE_MANUAL" != "true" ] && grep -Fxq "${LOCK_KEY}" "$LOCK_FILE" 2>/dev/null; then
+            echo "Already published ${LOCK_KEY} today — skipping without re-posting."
             echo "skip=true" >> $GITHUB_OUTPUT
           else
-            echo "Proceeding to publish ${LOCK_KEY} (event=${{ github.event_name }})"
+            echo "Proceeding to publish ${LOCK_KEY} (force_manual=${FORCE_MANUAL})"
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
@@ -206,22 +255,33 @@ jobs:
             --payload /tmp/autopilot_out/webhook_payload.json \
             --video "$VID_PATH"
 
-      - name: Record published slot lock & keep-alive heartbeat on main
+      - name: Record published slot lock & commented TikTok IDs on main
         if: steps.slot.outputs.skip != 'true' && steps.slot.outputs.slot != 'tiktok_comment_sync'
         run: |
           git config user.name "thanaweya-autopilot[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main || true
 
           LOCK_FILE="published_slots.log"
+          TK_LOG_FILE="commented_tiktok_ids.log"
           if [ -f "thanaweya-autopilot/published_slots.log" ]; then
             LOCK_FILE="thanaweya-autopilot/published_slots.log"
+            TK_LOG_FILE="thanaweya-autopilot/commented_tiktok_ids.log"
           fi
-          touch "$LOCK_FILE"
+
+          # نحتفظ بنسخة مؤقتة من المعرفات الجديدة قبل git pull --rebase
+          cp -f "$TK_LOG_FILE" /tmp/tk_ids_new.log 2>/dev/null || touch /tmp/tk_ids_new.log
+
+          git checkout -- "$TK_LOG_FILE" 2>/dev/null || true
+          git pull --rebase origin main || true
+
+          touch "$LOCK_FILE" "$TK_LOG_FILE"
           grep -Fxq "${{ steps.slot.outputs.lock_key }}" "$LOCK_FILE" || echo "${{ steps.slot.outputs.lock_key }}" >> "$LOCK_FILE"
           tail -n 60 "$LOCK_FILE" > "${LOCK_FILE}.tmp" && mv "${LOCK_FILE}.tmp" "$LOCK_FILE"
 
+          cat "$TK_LOG_FILE" /tmp/tk_ids_new.log | awk 'NF && !seen[$0]++' | tail -n 80 > "${TK_LOG_FILE}.tmp"
+          mv "${TK_LOG_FILE}.tmp" "$TK_LOG_FILE"
+
           echo "Last run: $(TZ=Africa/Cairo date) | Slot: ${{ steps.slot.outputs.slot }}" > last_run.txt
-          git add "$LOCK_FILE" last_run.txt
+          git add "$LOCK_FILE" "$TK_LOG_FILE" last_run.txt
           git diff --cached --quiet || git commit -m "Autopilot published: ${{ steps.slot.outputs.lock_key }}"
           git push origin HEAD || true
