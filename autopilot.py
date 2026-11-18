@@ -30,7 +30,11 @@ from studio_renderer import (
 
 SITE_URL = "https://thanaweya-ashy.vercel.app"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "openai/gpt-oss-120b"
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-120b",
+]
 
 
 def strip_all_digits_for_fb_video(text: str) -> str:
@@ -49,30 +53,90 @@ def strip_all_digits_for_fb_video(text: str) -> str:
 
 
 def call_groq_json(api_key: str, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
-    payload = {
-        "model": GROQ_MODEL,
-        "temperature": 0.55,
-        "max_completion_tokens": 4096,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+    """استدعاء فائق المرونة مع تدوير الموديلات ومزودي الذكاء الاصطناعي (Groq -> Gemini Flash -> Safety Fallback)"""
+    # 1. Groq Multi-Model
+    if api_key:
+        for model in GROQ_MODELS:
+            try:
+                payload = {
+                    "model": model,
+                    "temperature": 0.55,
+                    "max_completion_tokens": 4096,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                }
+                req = urllib.request.Request(
+                    GROQ_URL,
+                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json; charset=utf-8",
+                        "User-Agent": "ThanaweyaPlus-Autopilot/3.0",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=40) as resp:
+                    raw = json.loads(resp.read().decode("utf-8"))
+                content = raw["choices"][0]["message"]["content"]
+                return json.loads(content)
+            except Exception as e:
+                print(f"[Groq Notice {model}]: {e}")
+                continue
+
+    # 2. Google Gemini Flash Fallback
+    for gkey_var in ("GEMINI_API_KEY_2", "GEMINI_API_KEY", "GEMINI_API_KEY_3"):
+        gkey = os.getenv(gkey_var)
+        if not gkey:
+            continue
+        for gmodel in ("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.5-flash-lite"):
+            try:
+                gurl = f"https://generativelanguage.googleapis.com/v1beta/models/{gmodel}:generateContent?key={gkey}"
+                full_prompt = f"{system_prompt}\n\nالمطلوب إخراج JSON صالح فقط:\n{user_prompt}"
+                gpayload = {
+                    "contents": [{"parts": [{"text": full_prompt}]}],
+                    "generationConfig": {"responseMimeType": "application/json"}
+                }
+                req = urllib.request.Request(
+                    gurl,
+                    data=json.dumps(gpayload, ensure_ascii=False).encode("utf-8"),
+                    headers={"Content-Type": "application/json; charset=utf-8"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    raw = json.loads(resp.read().decode("utf-8"))
+                content = raw["candidates"][0]["content"]["parts"][0]["text"].strip()
+                clean = re.sub(r"^```(?:json)?\s*", "", content)
+                clean = re.sub(r"\s*```$", "", clean).strip()
+                start_i = clean.find("{")
+                end_i = clean.rfind("}")
+                if start_i != -1 and end_i != -1:
+                    clean = clean[start_i:end_i+1]
+                data = json.loads(clean)
+                print(f"[Autopilot] Success via Gemini ({gmodel})")
+                return data
+            except Exception as e:
+                print(f"[Gemini Notice {gmodel}]: {e}")
+                continue
+
+    # 3. Deterministic Safety Fallback (Never Crashes)
+    print("[Autopilot Fallback] Returning deterministic safety template")
+    return {
+        "g1_main_tip": "حل 15 سؤالاً على المفاهيم الأساسية وركز على التطبيقات المباشرة.",
+        "g1_sec_tip": "لخص القوانين الهامة وحل أسئلة الامتحانات السابقة.",
+        "g2_bac_tip": "افهم العلاقات الرياضية والتجريبية وركز على الرسوم البيانية.",
+        "g2_gen_tip": "ركز على النقاط الجدلية وتدرب على أسئلة الاختيار من متعدد.",
+        "g3_tip": "راجع زتونة الوحدة وحل امتحان شامل بوقت محدد.",
+        "g1_main_sum": "أهم القوانين والتركات المركزة لدرس اليوم في كبسولة سريعة.",
+        "g1_sec_sum": "ملخص شامل لأهم أفكار المسائل وتطبيقاتها الامتحانية.",
+        "g2_bac_sum": "تريكات وملاحظات هامة جداً لطلاب مسار البكالوريا.",
+        "g2_gen_sum": "القواعد الذهبية لحل أسئلة الفهم والتطبيق.",
+        "g3_sum": "كبسولة الإنقاذ وأهم أسئلة الامتحانات المتوقعة للثانوية العامة.",
+        "video_question": "ما الفكرة الأساسية التي يعتمد عليها قانون الدرس اليوم؟",
+        "video_choices": ["التطبيق المباشر", "العلاقة الطردية", "التوازن الديناميكي", "مبدأ الحفاظ"]
     }
-    req = urllib.request.Request(
-        GROQ_URL,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json; charset=utf-8",
-            "User-Agent": "ThanaweyaPlus-Autopilot/3.0",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=90) as resp:
-        raw = json.loads(resp.read().decode("utf-8"))
-    content = raw["choices"][0]["message"]["content"]
-    return json.loads(content)
 
 
 def _fmt_item_line(item: Dict[str, str], extra_note: str = "") -> str:
